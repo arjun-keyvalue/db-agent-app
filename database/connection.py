@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import pandas as pd
 from typing import Dict, Any, Tuple
 import logging
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -30,10 +31,21 @@ class DatabaseConnection:
                 connection_url = f"postgresql://{username}:{password}@{host}:{port}/{db_name}"
             elif db_type == 'mysql':
                 connection_url = f"mysql+pymysql://{username}:{password}@{host}:{port}/{db_name}"
+            elif db_type == 'sqlite3':
+                # For SQLite3, use the db_name parameter directly as it contains the full path
+                if db_name and os.path.exists(db_name):
+                    connection_url = f"sqlite:///{db_name}"
+                else:
+                    # Fallback: construct absolute path to the database file
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    db_path = os.path.join(base_dir, 'sqllite3', 'library.db')
+                    connection_url = f"sqlite:///{db_path}"
+            
             else:
                 return False, f"Unsupported database type: {db_type}"
             
             # Create engine
+            logger.info(f"Creating database engine with URL: {connection_url}")
             self.engine = create_engine(
                 connection_url,
                 echo=False,  # Set to True for debugging SQL queries
@@ -42,8 +54,10 @@ class DatabaseConnection:
             )
             
             # Test connection
+            logger.info(f"Testing database connection...")
             with self.engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
+            logger.info(f"Database connection test successful")
             
             # Store connection info
             self.connection_info = {
@@ -106,6 +120,17 @@ class DatabaseConnection:
                     WHERE table_schema = '{self.connection_info['database']}'
                     ORDER BY table_name
                 """
+            elif self.connection_info['type'] == 'sqlite3':
+                query = """
+                    SELECT 
+                        name as table_name,
+                        type as table_type
+                    FROM sqlite_master
+                    WHERE type='table'
+                    ORDER BY name
+                """
+            else:
+                return False, f"Unsupported database type: {self.connection_info['type']}"
             
             df = pd.read_sql(query, self.engine)
             return True, df
@@ -119,6 +144,10 @@ class DatabaseConnection:
         """Get schema information for a specific table"""
         if not self.is_connected():
             return False, "Not connected to database"
+        
+        logger.info(f"Getting schema for table: {table_name}")
+        logger.info(f"Engine exists: {self.engine is not None}")
+        logger.info(f"Connection info: {self.connection_info}")
         
         try:
             if self.connection_info['type'] == 'postgresql':
@@ -141,6 +170,20 @@ class DatabaseConnection:
                     ORDER BY ordinal_position
                 """
                 df = pd.read_sql(query, self.engine, params={'table_name': table_name})
+            elif self.connection_info['type'] == 'sqlite3':
+                # For SQLite, we use the pragma_table_info function
+                query = f"""
+                    SELECT 
+                        name as column_name,
+                        type as data_type,
+                        CASE WHEN "notnull" = 0 THEN 'YES' ELSE 'NO' END as is_nullable,
+                        dflt_value as column_default
+                    FROM pragma_table_info('{table_name}')
+                """
+                df = pd.read_sql(query, self.engine)
+            else:
+                return False, f"Unsupported database type: {self.connection_info['type']}"
+                
             return True, df
             
         except Exception as e:
