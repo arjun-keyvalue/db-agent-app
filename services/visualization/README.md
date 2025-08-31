@@ -9,6 +9,14 @@ The visualization module converts natural language queries into interactive char
 - **Plotly** for interactive chart generation
 - **OpenAI GPT-3.5-turbo** for intelligent SQL generation and chart type selection
 
+## 📊 Sample Visualizations for Library Schema
+
+Here are some possible user queries and their expected chart types:
+
+- **"Show me book distribution by genre"** → Pie Chart
+- **"Compare ratings across different authors"** → Bar Chart
+- **"Compare book popularity vs publication year"** → Scatter Plot
+
 ## Architecture
 
 ```
