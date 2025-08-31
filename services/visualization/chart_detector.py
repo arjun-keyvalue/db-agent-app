@@ -168,7 +168,7 @@ class ChartTypeDetector:
             config["y_column"] = characteristics["numerical_columns"][0]
             return "bar_chart", config
         
-        # Fallback: table view for complex data
+        # Fallback: table view for complex data.
         return "table", config
     
     def get_supported_chart_types(self) -> List[str]:
