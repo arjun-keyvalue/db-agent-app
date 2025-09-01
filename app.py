@@ -11,6 +11,7 @@ from config import Config
 import uuid
 import plotly.graph_objects as go
 import os
+from simple_rag.rag_logic import create_sql_agent
 
 # Add the hardcoded SQLite3 database path
 SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'sqllite3', 'library.db')
@@ -236,7 +237,8 @@ app.layout = dbc.Container([
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Visualize", "value": "visualize"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
-                                            {"label": "Multi-Table Join", "value": "multitablejoin"}
+                                            {"label": "Multi-Table Join", "value": "multitablejoin"},
+                                            {"label": "Simple RAG", "value": "simple_rag"}
                                         ],
                                         value="schema",
                                         size="sm",
@@ -360,6 +362,61 @@ def toggle_modal(n1, n2, n3, is_open):
     if n1 or n2 or n3:
         return not is_open
     return is_open
+
+# Initialize SQL Agent
+def initialize_sql_agent():
+    """Initialize the SQL Agent with Qdrant configuration"""
+    load_dotenv()
+
+    qdrant_config = {
+        'url': os.getenv('QDRANT_URL'),
+        'collection_name': os.getenv('QDRANT_COLLECTION')
+    }
+    
+    groq_api_key = os.getenv('GROQ_API_KEY')  # Updated variable name
+    
+    if not groq_api_key or not qdrant_config['url'] or not qdrant_config['collection_name']:
+        logger.error("Please configure QDRANT_URL, QDRANT_COLLECTION, and GROQ_API_KEY in the .env file")  # Updated error message
+        return None
+    
+    try:
+        return create_sql_agent(qdrant_config, groq_api_key)  # Updated parameter name
+    except Exception as e:
+        logger.error(f"Failed to initialize SQL Agent: {str(e)}")
+        return None
+
+# SQL Agent function
+def rag_sql_agent_response(user_query):
+    """
+    Process user query using RAG-based SQL agent
+    """
+    try:
+        agent = initialize_sql_agent()
+        if agent is None:
+            return "❌ Failed to initialize SQL Agent. Please check the logs for more details."
+        
+        result = agent.process_query(user_query)
+        
+        if result['success']:
+            response = f"""
+**Query Understanding:**
+I found relevant tables: {', '.join(result['relevant_tables'])}
+
+**Generated SQL:**
+```sql
+{result['sql_query']}
+```
+
+**Results:**
+{result['results']}
+            """
+        else:
+            response = f"❌ **Error:** {result['error']}"
+        
+        return response
+    
+    except Exception as e:
+        return f"❌ **System Error:** {str(e)}"
 
 # Callback for chat functionality
 @app.callback(
@@ -570,6 +627,8 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
         except Exception as e:
             agent_response = f"❌ Error processing query: {str(e)}"
             logger.error(f"Query processing error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             sql_query = None
             results = None
             results_data = None

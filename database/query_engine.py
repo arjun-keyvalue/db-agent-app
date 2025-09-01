@@ -779,6 +779,49 @@ class GroqSchemaBasedQueryEngine(SchemaBasedQueryEngine):
             self._update_conversation_context(user_query, f"ERROR: {error_msg}", None)
             return False, error_msg
 
+class SimpleRAGQueryEngine(QueryEngine):
+    """Simple RAG-based query generation using Qdrant and Groq"""
+    
+    def __init__(self, qdrant_config: Dict, groq_api_key: str):
+        from simple_rag.rag_logic import SQLAgent
+        self.sql_agent = SQLAgent(qdrant_config, groq_api_key)
+        logger.info("Initialized SimpleRAGQueryEngine")
+    
+    def get_name(self) -> str:
+        return "Simple RAG Querying"
+    
+    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """Generate SQL query using RAG logic"""
+        try:
+            result = self.sql_agent.process_query(user_query)
+            if result['success']:
+                return True, result['sql_query']
+            else:
+                return False, result['error']
+        except Exception as e:
+            error_msg = f"Failed to generate query: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
+        """Execute the generated SQL query"""
+        try:
+            # _execute_sql_query returns (results, columns) tuple
+            results, columns = self.sql_agent._execute_sql_query(sql_query)
+            
+            # Convert to DataFrame for consistency with other engines
+            import pandas as pd
+            if results and columns:
+                df = pd.DataFrame(results, columns=columns)
+                return True, df
+            else:
+                return True, pd.DataFrame()  # Empty DataFrame if no results
+                
+        except Exception as e:
+            error_msg = f"Failed to execute query: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
 class QueryEngineFactory:
     """Factory for creating query engines"""
     
@@ -802,6 +845,8 @@ class QueryEngineFactory:
             if not api_key:
                 raise ValueError("OpenAI API key required for visualization")
             return VisualizationQueryEngine(api_key)
+        elif engine_type == "simple_rag":
+            return SimpleRAGQueryEngine(config.get('qdrant_config'), config.get('groq_api_key'))
         else:
             raise ValueError(f"Unknown query engine type: {engine_type}")
     
