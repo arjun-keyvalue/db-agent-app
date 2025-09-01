@@ -510,6 +510,79 @@ class RAGQueryEngine(QueryEngine):
         """Placeholder for RAG implementation"""
         return False, "RAG querying not yet implemented"
 
+
+class AdvancedRAGQueryEngine(QueryEngine):
+    """Advanced RAG-based query generation with self-correction and validation"""
+    
+    def __init__(self, openai_api_key: str, model: str = "gpt-3.5-turbo"):
+        self.openai_api_key = openai_api_key
+        self.model = model
+        self.rag_agent = None
+        self._last_result = None
+        self._initialize_agent()
+    
+    def _initialize_agent(self):
+        """Initialize the RAG agent"""
+        try:
+            from agents.rag_agent import RAGAgent
+            from config import Config
+            
+            self.rag_agent = RAGAgent(
+                db_connection=db_connection,
+                openai_api_key=self.openai_api_key,
+                model=Config.RAG_MODEL,
+                lancedb_path=Config.LANCEDB_PATH
+            )
+            logger.info("Advanced RAG Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Advanced RAG Agent: {str(e)}")
+            self.rag_agent = None
+    
+    def get_name(self) -> str:
+        return "RAG (Self-Correction and Validation)"
+    
+    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """Generate query using RAG agent with self-correction"""
+        if not self.rag_agent:
+            return False, "Advanced RAG Agent not initialized. Check dependencies: pip install langgraph litellm lancedb sqlfluff sqlglot"
+        
+        try:
+            from config import Config
+            database_type = context.get('db_type', 'postgresql')
+            
+            result = self.rag_agent.process_query(
+                user_query=user_query, 
+                database_type=database_type,
+                max_corrections=Config.MAX_CORRECTIONS
+            )
+            
+            # Store the full result for execute_query
+            self._last_result = result
+            
+            if result['success']:
+                return True, result['sql_query']
+            else:
+                return False, result['error_message']
+        
+        except Exception as e:
+            error_msg = f"Advanced RAG query generation failed: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
+        """Return the result from RAG agent processing"""
+        if hasattr(self, '_last_result') and self._last_result:
+            result = self._last_result
+            self._last_result = None  # Clear after use
+            
+            if result['success'] and result['result'] is not None:
+                return True, result['result']
+            else:
+                return False, result.get('error_message', 'Query execution failed')
+        else:
+            # Fallback to direct execution
+            return db_connection.execute_query(sql_query)
+
 class VisualizationQueryEngine(QueryEngine):
     """Visualization-based query generation using LangChain and Plotly"""
     
@@ -592,6 +665,11 @@ class QueryEngineFactory:
             return SchemaBasedQueryEngine(api_key)
         elif engine_type == "rag":
             return RAGQueryEngine()
+        elif engine_type == "rag_advanced":
+            api_key = config.get('openai_api_key')
+            if not api_key:
+                raise ValueError("OpenAI API key required for RAG with self-correction")
+            return AdvancedRAGQueryEngine(api_key)
         elif engine_type == "multitablejoin":
             return MultitablejoinQueryEngine(config.get('db_uri'), config.get('openai_api_key'))
         elif engine_type == "visualize":

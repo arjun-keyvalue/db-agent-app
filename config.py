@@ -19,6 +19,12 @@ class Config:
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
     
+    # RAG Agent Configuration
+    RAG_MODEL = os.getenv('RAG_MODEL', 'gpt-3.5-turbo')
+    LANCEDB_PATH = os.getenv('LANCEDB_PATH', './lancedb_rag')
+    MAX_CORRECTIONS = int(os.getenv('MAX_CORRECTIONS', '3'))
+    QUERY_TIMEOUT = int(os.getenv('QUERY_TIMEOUT', '30'))
+    
     # App Configuration
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
     HOST = os.getenv('HOST', '0.0.0.0')
