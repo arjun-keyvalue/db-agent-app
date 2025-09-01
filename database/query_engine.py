@@ -398,7 +398,7 @@ Otherwise, generate the SQL query using ONLY the exact schema provided:
             return True
             
         except Exception as e:
-            logger.error(f"SQL validation error: {str(e)}")
+            logger.error(f"Error during SQL validation: {str(e)}")
             return False
         
 
@@ -570,14 +570,214 @@ class VisualizationQueryEngine(QueryEngine):
             return False, error_msg
 
 class BasicSecurityGuardrail(SecurityGuardrail):
-    """Basic SQL injection protection (placeholder)"""
+    """Basic SQL injection and destructive operation protection"""
     
     def get_name(self) -> str:
         return "Basic Security Guardrails"
     
     def validate_query(self, sql_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Placeholder for security validation"""
-        return True, "Security validation passed"
+        """Validate query and input for unsafe patterns, optionally with LLM classification."""
+        try:
+            user_text = (context.get("user_input") or "").lower()
+            combined_text = f" {user_text} \n {sql_query.lower()} "
+
+            unsafe_markers = [
+                " drop ",
+                " delete ",
+                " truncate ",
+                " alter ",
+                " update ",
+                " insert ",
+                " create ",
+                " grant ",
+                " revoke ",
+                " vacuum ",
+                " analyze ",
+                ";--",
+                " or 1=1",
+                " xp_cmdshell",
+                # intent synonyms
+                " destroy ",
+                " remove table",
+                " erase table",
+                " wipe ",
+                " purge ",
+                " drop table",
+            ]
+
+            # Additional sensitive data exfiltration markers (critical)
+            sensitive_markers = [
+                " username ",
+                " user name ",
+                " usernames ",
+                " password ",
+                " passwords ",
+                " passwd ",
+                " password hash",
+                " password hashes",
+            ]
+
+            # Block if any static destructive marker appears
+            if any(marker in combined_text for marker in unsafe_markers):
+                return False, "Blocked by guardrails: potentially destructive or unsafe database operation detected."
+
+            # Block if any sensitive exfiltration marker appears in user text or SQL
+            if any(marker in combined_text for marker in sensitive_markers):
+                return False, "Blocked by guardrails: request for credentials (username/password) is not allowed."
+
+            # Inspect SELECT columns for sensitive identifiers
+            import re
+            select_match = re.search(r"SELECT\s+(.*?)\s+FROM", sql_query, re.IGNORECASE | re.DOTALL)
+            if select_match:
+                select_clause = select_match.group(1)
+                # Split columns by comma, handle aliases
+                columns = [c.strip() for c in select_clause.split(',')]
+                # Normalize: remove table prefixes and aliases
+                normalized_cols = []
+                for col in columns:
+                    # Remove AS alias
+                    upper = col.upper()
+                    if ' AS ' in upper:
+                        col = col[:upper.index(' AS ')].strip()
+                    # Remove table prefix
+                    if '.' in col:
+                        col = col.split('.')[-1].strip()
+                    normalized_cols.append(col.lower())
+                # Block if any column name suggests credentials
+                for col in normalized_cols:
+                    if re.search(r"\b(user_?name|username|password|passwd|password_?hash|pwd_hash)\b", col):
+                        return False, "Blocked by guardrails: query attempts to select username/password fields."
+
+            # Optional: LLM-based secondary classification (only if security is enabled)
+            if context.get("security_enabled", True):
+                from config import Config
+                if Config.GROQ_API_KEY:
+                    try:
+                        from langchain_groq import ChatGroq
+                        llm = ChatGroq(
+                            groq_api_key=Config.GROQ_API_KEY,
+                            model_name="llama-3.1-8b-instant",
+                            temperature=0.0,
+                            max_tokens=64,
+                        )
+                        prompt = (
+                            "Classify the following user request for database safety. "
+                            "If it could cause destructive effects (e.g., DROP/TRUNCATE/ALTER/DELETE/INSERT/CREATE/GRANT/REVOKE, privilege escalation, exfiltration), label it UNSAFE. "
+                            "Any request to access credentials or PII (e.g., usernames, user names, passwords, password hashes, API keys, tokens, emails, SSNs) MUST be labeled UNSAFE. "
+                            "If it looks like a harmless read/query request, label it SAFE. "
+                            "Respond with SAFE or UNSAFE only.\n\nRequest: " + (context.get("user_input") or "")
+                        )
+                        res = llm.invoke([
+                            ("system", "You are a strict DB safety classifier."),
+                            ("user", prompt),
+                        ])
+                        verdict = (res.content if hasattr(res, "content") else str(res)).strip().upper()
+                        if "UNSAFE" in verdict and "SAFE" not in verdict:
+                            return False, "Blocked by guardrails: the request was classified as potentially harmful to the database."
+                    except Exception:
+                        # Non-fatal: skip if classifier unavailable
+                        pass
+
+            return True, "Security validation passed"
+        except Exception as e:
+            logger.error(f"Security validation error: {e}")
+            return False, "Blocked by guardrails due to internal validation error"
+
+class GroqSchemaBasedQueryEngine(SchemaBasedQueryEngine):
+    """Schema-based query generation using Groq (LangChain ChatGroq)"""
+    
+    def __init__(self, groq_api_key: str):
+        # Avoid OpenAI client setup; just initialize shared state
+        self.groq_api_key = groq_api_key
+        self.conversation_context = []
+        self.current_table_context = None
+        logger.info("Initialized GroqSchemaBasedQueryEngine with empty conversation context")
+    
+    def get_name(self) -> str:
+        return "Schema-Based Querying (Groq)"
+    
+    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        logger.info(f"Starting generate_query (Groq) with user_query: '{user_query}'")
+        logger.info(f"Current conversation context has {len(self.conversation_context)} interactions")
+        
+        try:
+            # Ensure DB connection
+            if not db_connection.is_connected():
+                return False, "Not connected to database"
+            
+            # Get schema
+            tables_success, tables_result = db_connection.get_tables()
+            if not tables_success:
+                return False, f"Failed to get tables: {tables_result}"
+            if tables_result.empty:
+                return False, "No tables found in the database"
+            
+            schema_context = self._build_schema_context(tables_result)
+            if "WARNING: No tables found" in schema_context or "Available tables in this database:" not in schema_context:
+                return False, "Failed to extract database schema properly"
+            
+            prompt = self._create_prompt(user_query, schema_context, context)
+            logger.info("=== GROQ PROMPT ===")
+            logger.info(f"User Query: {user_query}")
+            logger.info(f"Schema Context: {schema_context}")
+            logger.info(f"Full Prompt: {prompt}")
+            logger.info("=== END PROMPT ===")
+            
+            # Lazy import to avoid hard dependency unless used
+            try:
+                from langchain_groq import ChatGroq
+            except Exception as import_error:
+                return False, f"Groq dependencies not available: {import_error}"
+            
+            llm = ChatGroq(
+                groq_api_key=self.groq_api_key,
+                model_name="llama-3.1-8b-instant",
+                temperature=0.0,
+                max_tokens=1000,
+            )
+            res = llm.invoke([
+                ("system", "You are a SQL expert. You are STRICTLY FORBIDDEN from using any tables, columns, or relationships that are not explicitly listed in the provided schema. You must verify every element exists before generating SQL. If anything is missing, explain what IS available instead of guessing."),
+                ("user", prompt),
+            ])
+            sql_query = (res.content if hasattr(res, "content") else str(res)).strip()
+            
+            # Clean markdown fences
+            if sql_query.startswith("```sql"):
+                sql_query = sql_query[7:]
+            if sql_query.endswith("```"):
+                sql_query = sql_query[:-3]
+            sql_query = sql_query.strip()
+            
+            # Postgres schema prefixing
+            if context.get('db_type') == 'postgresql':
+                import re
+                sql_query = re.sub(r'\bFROM\s+(\w+)\b', r'FROM public.\1', sql_query, flags=re.IGNORECASE)
+                sql_query = re.sub(r'\bJOIN\s+(\w+)\b', r'JOIN public.\1', sql_query, flags=re.IGNORECASE)
+                sql_query = re.sub(r'\bUPDATE\s+(\w+)\b', r'UPDATE public.\1', sql_query, flags=re.IGNORECASE)
+                sql_query = re.sub(r'\bINSERT\s+INTO\s+(\w+)\b', r'INSERT INTO public.\1', sql_query, flags=re.IGNORECASE)
+                sql_query = re.sub(r'\bDELETE\s+FROM\s+(\w+)\b', r'DELETE FROM public.\1', sql_query, flags=re.IGNORECASE)
+                logger.info(f"Added schema prefix to query: {sql_query}")
+            
+            # Validate against schema
+            if not self._validate_sql_against_schema(sql_query, tables_result):
+                return False, "Generated SQL references non-existent tables or columns. Please try rephrasing your question."
+            
+            logger.info(f"Generated SQL query (Groq): {sql_query}")
+            
+            # Update conversation context
+            table_name = self._extract_table_name_from_sql(sql_query)
+            logger.info(f"Updating conversation context with table: {table_name}")
+            self._update_conversation_context(user_query, sql_query, table_name)
+            logger.info(f"Conversation context updated. Total interactions: {len(self.conversation_context)}")
+            
+            logger.info(f"Ending generate_query (Groq) successfully. Final context has {len(self.conversation_context)} interactions")
+            return True, sql_query
+        
+        except Exception as e:
+            error_msg = f"Failed to generate SQL query (Groq): {str(e)}"
+            logger.error(error_msg)
+            self._update_conversation_context(user_query, f"ERROR: {error_msg}", None)
+            return False, error_msg
 
 class QueryEngineFactory:
     """Factory for creating query engines"""
@@ -586,7 +786,10 @@ class QueryEngineFactory:
     def create_query_engine(engine_type: str, config: Dict[str, Any]) -> QueryEngine:
         """Create a query engine instance"""
         if engine_type == "schema":
-            api_key = config.get('openai_api_key')
+            groq_key = config.get("groq_api_key") or config.get("GROQ_API_KEY")
+            if groq_key:
+                return GroqSchemaBasedQueryEngine(groq_key)
+            api_key = config.get("openai_api_key")
             if not api_key:
                 raise ValueError("OpenAI API key required for schema-based querying")
             return SchemaBasedQueryEngine(api_key)
