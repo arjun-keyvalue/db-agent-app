@@ -1,0 +1,26 @@
+[project]
+name = "db-agent-app"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "cryptography==41.0.7",
+    "dash==2.17.0",
+    "dash-bootstrap-components==1.5.0",
+    "dash-extensions==1.0.4",
+    "flask==2.3.3",
+    "gunicorn==21.2.0",
+    "lancedb>=0.24.3",
+    "langchain-community>=0.3.21",
+    "langchain-openai>=0.3.32",
+    "openai>=1.6.1",
+    "numpy==1.26.4",
+    "pandas==2.1.4",
+    "plotly==5.17.0",
+    "psycopg2-binary==2.9.9",
+    "pymysql==1.1.0",
+    "python-dotenv==1.0.0",
+    "requests==2.31.0",
+    "sqlalchemy==2.0.23",
+]
