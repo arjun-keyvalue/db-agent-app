@@ -234,7 +234,7 @@ app.layout = dbc.Container([
                                         options=[
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
-                                            {"label": "Visualize", "value": "visualize"}
+                                            {"label": "Visualize", "value": "visualize"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Multi-Table Join", "value": "multitablejoin"}
                                         ],
