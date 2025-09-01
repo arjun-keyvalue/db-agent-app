@@ -627,8 +627,6 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
         except Exception as e:
             agent_response = f"❌ Error processing query: {str(e)}"
             logger.error(f"Query processing error: {str(e)}")
-            import traceback
-            traceback.print_exc()
             sql_query = None
             results = None
             results_data = None
