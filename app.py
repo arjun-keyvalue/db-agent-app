@@ -235,7 +235,6 @@ app.layout = dbc.Container([
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Visualize", "value": "visualize"},
-                                            {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Multi-Table Join", "value": "multitablejoin"}
                                         ],
                                         value="schema",
@@ -247,7 +246,7 @@ app.layout = dbc.Container([
                                     dbc.Checkbox(
                                         id="security-guardrail",
                                         label="Security Guardrails",
-                                        value=True,
+                                        value=False,
                                         className="text-light"
                                     )
                                 ], md=4, className="d-flex align-items-center justify-content-center", style={"marginTop": "10px"})
