@@ -177,7 +177,6 @@ class SQLAgent:
     
     def _execute_sql_query(self, sql_query: str) -> Tuple[List, List]:
         """Execute SQL query and return results"""
-        print("Generated query= \n", sql_query) 
         try:
             conn = self._get_db_connection()
             cursor = conn.cursor()
