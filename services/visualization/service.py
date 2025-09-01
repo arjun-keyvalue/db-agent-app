@@ -6,7 +6,7 @@ into data visualizations using LangChain and the database connection.
 import pandas as pd
 from typing import Dict, Any, Tuple, Optional, List
 import logging
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -21,23 +21,23 @@ class VisualizationService:
     Integrates with the existing database connection and query engine architecture.
     """
     
-    def __init__(self, db_connection, openai_api_key: str):
+    def __init__(self, db_connection, groq_api_key: str):
         """
         Initialize the visualization service.
         
         Args:
             db_connection: Database connection instance
-            openai_api_key: OpenAI API key for LLM operations
+            groq_api_key: Groq API key for LLM operations
         """
         self.db_connection = db_connection
-        self.openai_api_key = openai_api_key
+        self.groq_api_key = groq_api_key
         self.chart_detector = ChartTypeDetector()
         self.plotly_generator = PlotlyGenerator()
         
         # Initialize LangChain components
-        self.llm = ChatOpenAI(
-            api_key=openai_api_key,
-            model="gpt-3.5-turbo",
+        self.llm = ChatGroq(
+            api_key=groq_api_key,
+            model="openai/gpt-oss-120b",
             temperature=0.0
         )
         
