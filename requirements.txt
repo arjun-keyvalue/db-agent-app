@@ -3,13 +3,14 @@ dash-bootstrap-components==1.5.0
 dash-extensions==1.0.4
 plotly==5.17.0
 pandas==2.1.4
-numpy==1.25.2
+numpy>=1.26.4,<3
 python-dotenv==1.0.0
 requests==2.31.0
 sqlalchemy==2.0.23
 psycopg2-binary==2.9.9
 pymysql==1.1.0
 cryptography==41.0.7
+google-generativeai==0.3.2
 openai==1.102.0
 flask==2.3.3
 gunicorn==21.2.0
