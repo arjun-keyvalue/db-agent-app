@@ -1,10 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 import openai
 import google.generativeai as genai  # For Gemini API
+from openai import OpenAI
 import logging
 from datetime import datetime
 from database.connection import db_connection
+from sqlalchemy import text
+from langchain_community.utilities import SQLDatabase
+from .sqllite3.schema_embeddings import SchemaEmbeddings
+from .sqllite3.sql_generator import SQLGenerator
+
+
+from services.visualization.service import VisualizationService
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +52,7 @@ class SchemaBasedQueryEngine(QueryEngine):
     
     def __init__(self, openai_api_key: str):
         self.openai_api_key = openai_api_key
-        openai.api_key = openai_api_key
+        self.client = OpenAI(api_key=openai_api_key)
         self.conversation_context = []  # Store conversation history
         self.current_table_context = None  # Store current table being discussed
         logger.info(f"Initialized SchemaBasedQueryEngine with empty conversation context")
@@ -117,7 +125,7 @@ class SchemaBasedQueryEngine(QueryEngine):
             logger.info(f"=== END PROMPT ===")
             
             # Call OpenAI API
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a SQL expert. You are STRICTLY FORBIDDEN from using any tables, columns, or relationships that are not explicitly listed in the provided schema. You must verify every element exists before generating SQL. If anything is missing, explain what IS available instead of guessing."},
@@ -393,6 +401,101 @@ Otherwise, generate the SQL query using ONLY the exact schema provided:
         except Exception as e:
             logger.error(f"SQL validation error: {str(e)}")
             return False
+        
+
+class MultitablejoinQueryEngine(QueryEngine):
+    """Multitablejoin-based query generation"""
+    
+    def __init__(self, db_uri: str, openai_api_key: str, lancedb_uri: str = "./lancedb"):
+        
+        if not db_connection.is_connected():
+            raise ValueError("Not connected to database")
+        # self.db = SQLDatabase.from_uri(db_uri)
+        # self.engine = self.db._engine
+        self.schema_embeddings = SchemaEmbeddings(openai_api_key, lancedb_uri)
+        self.sql_generator = SQLGenerator(openai_api_key)
+        
+        # Initialize schema embeddings
+        self._initialize_schema_embeddings()
+    
+    def get_name(self) -> str:
+        return "Multitablejoin Querying"
+    
+    def _initialize_schema_embeddings(self) -> None:
+        """Initialize schema embeddings by extracting and storing schema information"""
+        schema_data = []
+        
+        with db_connection.engine.connect() as conn:
+            # Get tables first
+            tables_success, tables_result = db_connection.get_tables()
+            if not tables_success:
+                raise ValueError(f"Failed to get tables: {tables_result}")
+            
+            # Iterate over the DataFrame rows
+            for _, table_row in tables_result.iterrows():
+                table_name = table_row['table_name']
+                table_data = {}
+                table_data['table'] = table_name
+                
+                # Get schema
+                schema = conn.execute(text(f"PRAGMA table_info({table_name});")).fetchall()
+                schema_str = ", ".join([f"{col[1]} {col[2]}" for col in schema])
+                table_data['schema'] = schema_str
+                
+                # Get foreign keys
+                fkeys = conn.execute(text(f"PRAGMA foreign_key_list({table_name});")).fetchall()
+                if fkeys:
+                    fk_str = "; ".join([f"{table_name}.{fk[3]} → {fk[2]}.{fk[4]}" for fk in fkeys])
+                    table_data['relationships'] = fk_str
+                
+                # Get sample rows
+                rows = conn.execute(text(f"SELECT * FROM {table_name} LIMIT 3;")).fetchall()
+                table_data['sample_rows'] = rows
+                
+                schema_data.append(table_data)
+        
+        # Create and store embeddings
+        chunks = self.schema_embeddings.create_schema_chunks(schema_data)
+        self.schema_embeddings.store_embeddings(chunks)
+    
+    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """Generate SQL query using multitablejoin approach"""
+        try:
+            # Get relevant schema chunks
+            schema_chunks = self.schema_embeddings.get_relevant_chunks(user_query)
+            
+            # Generate SQL query
+            sql_query = self.sql_generator.generate_sql(user_query, schema_chunks)
+            
+            return True, sql_query
+            
+        except Exception as e:
+            return False, f"Failed to generate query: {str(e)}"
+    
+    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
+        """Execute the generated SQL query"""
+        try:
+            result = db_connection.execute_query(sql_query)
+            
+            if not result[0]:
+                return False, f"Failed to execute query: {result[1]}"
+            
+            return True, result[1]
+            
+        except Exception as e:
+            return False, f"Query execution failed: {str(e)}"
+
+
+
+
+
+
+
+
+
+
+
+
 
 class BasicTextToSQLEngine(QueryEngine):
     """Basic text-to-SQL using manual prompt construction with schema and few-shot examples"""
@@ -555,6 +658,65 @@ class RAGQueryEngine(QueryEngine):
         """Placeholder for RAG implementation"""
         return False, "RAG querying not yet implemented"
 
+class VisualizationQueryEngine(QueryEngine):
+    """Visualization-based query generation using LangChain and Plotly"""
+    
+    def __init__(self, openai_api_key: str):
+        self.openai_api_key = openai_api_key
+        self.visualization_service = None
+        logger.info("Initialized VisualizationQueryEngine")
+    
+    def get_name(self) -> str:
+        return "Data Visualization"
+    
+    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Generate visualization from user query.
+        Note: This method returns visualization metadata instead of SQL.
+        """
+        try:
+            # Lazy import to avoid circular dependencies
+            if self.visualization_service is None:
+                self.visualization_service = VisualizationService(db_connection, self.openai_api_key)
+            
+            # Validate if the query is suitable for visualization
+            is_valid, validation_message = self.visualization_service.validate_visualization_request(user_query)
+            if not is_valid:
+                return False, validation_message
+            
+            # Process the visualization request
+            success, result = self.visualization_service.process_visualization_request(user_query, context)
+            
+            if success:
+                # Store the visualization result for execute_query to return
+                self._last_result = result
+                # Return the SQL query that was generated for transparency
+                return True, result['sql_query']
+            else:
+                return False, result
+                
+        except Exception as e:
+            error_msg = f"Visualization generation failed: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
+        """
+        Return the visualization result instead of executing SQL.
+        The actual SQL execution is handled by the visualization service.
+        """
+        try:
+            if hasattr(self, '_last_result'):
+                result = self._last_result
+                delattr(self, '_last_result')  # Clean up
+                return True, result
+            else:
+                return False, "No visualization result available"
+        except Exception as e:
+            error_msg = f"Failed to return visualization: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+
 class BasicSecurityGuardrail(SecurityGuardrail):
     """Basic SQL injection protection (placeholder)"""
     
@@ -584,6 +746,13 @@ class QueryEngineFactory:
             return BasicTextToSQLEngine(gemini_key)
         elif engine_type == "rag":
             return RAGQueryEngine()
+        elif engine_type == "multitablejoin":
+            return MultitablejoinQueryEngine(config.get('db_uri'), config.get('openai_api_key'))
+        elif engine_type == "visualize":
+            api_key = config.get('openai_api_key')
+            if not api_key:
+                raise ValueError("OpenAI API key required for visualization")
+            return VisualizationQueryEngine(api_key)
         else:
             raise ValueError(f"Unknown query engine type: {engine_type}")
     

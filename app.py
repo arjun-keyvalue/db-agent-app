@@ -9,6 +9,11 @@ from database.connection import db_connection
 from database.query_engine import query_engine_factory
 from config import Config
 import uuid
+import plotly.graph_objects as go
+import os
+
+# Add the hardcoded SQLite3 database path
+SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'sqllite3', 'library.db')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -230,6 +235,8 @@ app.layout = dbc.Container([
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "Basic Text-to-SQL", "value": "basic"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"}
+                                            {"label": "Visualize", "value": "visualize"}
+                                            {"label": "Multi-Table Join", "value": "multitablejoin"}
                                         ],
                                         value="schema",
                                         size="sm",
@@ -277,20 +284,27 @@ app.layout = dbc.Container([
                 dbc.Row([
                     dbc.Col([
                         dbc.Label("Database Type", className="mb-2"),
-                                                 dbc.Select(
-                             id="db-type",
-                             options=[
-                                 {"label": "PostgreSQL", "value": "postgresql"},
-                                 {"label": "MySQL", "value": "mysql"}
-                             ],
-                             value="postgresql"
-                         )
+                        dbc.Select(
+                            id="db-type",
+                            options=[
+                                {"label": "PostgreSQL", "value": "postgresql"},
+                                {"label": "MySQL", "value": "mysql"},
+                                {"label": "SQLite3", "value": "sqlite3"}
+                            ],
+                            value="postgresql"
+                        )
                     ], md=6),
                     dbc.Col([
                         dbc.Label("Host", className="mb-2"),
                         dbc.Input(id="db-host", placeholder="localhost", value="localhost")
                     ], md=6)
                 ], className="mb-3"),
+                
+                # Add SQLite file selector
+                # html.Div(id="sqlite-file-selector", style={"display": "none"}, children=[
+                #     dbc.Label("SQLite Database File", className="mb-2"),
+                #     dbc.Input(id="sqlite-file", type="text", placeholder="Path to SQLite database file")
+                # ]),
                 
                 dbc.Row([
                     dbc.Col([
@@ -357,9 +371,14 @@ def toggle_modal(n1, n2, n3, is_open):
     [State("chat-input", "value"),
      State("chat-store", "data"),
      State("settings-store", "data"),
-     State("connection-store", "data")]
+     State("connection-store", "data"),
+     State("db-modal", "is_open")]
 )
-def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connection):
+def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connection, modal_is_open):
+    # Prevent chat processing when database modal is open
+    if modal_is_open:
+        return chat_history or [], "", chat_history or []
+    
     if not input_value:
         return chat_history or [], "", chat_history or []
     
@@ -396,7 +415,8 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
             # Create query engine
             engine_config = {
                 "OPENAI_API_KEY": Config.OPENAI_API_KEY,
-                "GEMINI_API_KEY": Config.GEMINI_API_KEY
+                "GEMINI_API_KEY": Config.GEMINI_API_KEY,
+                "db_uri": SQLITE_DB_PATH
             }
             query_engine = query_engine_factory.create_query_engine(strategy, engine_config)
             
@@ -424,8 +444,25 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
                         # Execute the query
                         exec_success, exec_result = query_engine.execute_query(sql_result)
                         if exec_success:
-                            # Format the result
-                            if isinstance(exec_result, pd.DataFrame):
+                            # Handle visualization results differently
+                            if strategy == "visualize" and isinstance(exec_result, dict) and 'figure' in exec_result:
+                                # Visualization result
+                                agent_response = f"Generated visualization: {exec_result.get('chart_type', 'chart').replace('_', ' ').title()}"
+                                sql_query = sql_result
+                                results = dcc.Graph(
+                                    figure=exec_result['figure'],
+                                    style={'height': '500px'},
+                                    config={'displayModeBar': True, 'displaylogo': False}
+                                )
+                                # Store visualization metadata
+                                results_data = {
+                                    'type': 'visualization',
+                                    'chart_type': exec_result.get('chart_type'),
+                                    'data_summary': exec_result.get('data_summary'),
+                                    'chart_config': exec_result.get('chart_config')
+                                }
+                            # Format regular tabular results
+                            elif isinstance(exec_result, pd.DataFrame):
                                 result_html = dbc.Table.from_dataframe(
                                     exec_result, 
                                     striped=True, 
@@ -469,7 +506,24 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
                     # Security disabled - execute directly
                     exec_success, exec_result = query_engine.execute_query(sql_result)
                     if exec_success:
-                        if isinstance(exec_result, pd.DataFrame):
+                        # Handle visualization results differently
+                        if strategy == "visualize" and isinstance(exec_result, dict) and 'figure' in exec_result:
+                            # Visualization result
+                            agent_response = f"Generated visualization: {exec_result.get('chart_type', 'chart').replace('_', ' ').title()}"
+                            sql_query = sql_result
+                            results = dcc.Graph(
+                                figure=exec_result['figure'],
+                                style={'height': '500px'},
+                                config={'displayModeBar': True, 'displaylogo': False}
+                            )
+                            # Store visualization metadata
+                            results_data = {
+                                'type': 'visualization',
+                                'chart_type': exec_result.get('chart_type'),
+                                'data_summary': exec_result.get('data_summary'),
+                                'chart_config': exec_result.get('chart_config')
+                            }
+                        elif isinstance(exec_result, pd.DataFrame):
                             result_html = dbc.Table.from_dataframe(
                                 exec_result, 
                                 striped=True, 
@@ -535,6 +589,9 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
     if 'results_data' in locals() and results_data is not None:
         agent_message["results_data"] = results_data
         agent_message["has_results"] = True  # Set the flag for rendering
+    # Store live visualization component for current message
+    if 'results' in locals() and isinstance(results, dcc.Graph):
+        agent_message["live_visualization"] = results
     
     chat_history.append(agent_message)
     
@@ -570,10 +627,34 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
                     ])
                 ]))
             
+            # Add live visualization if present (for current message)
+            if "live_visualization" in msg:
+                message_content.append(html.Div([
+                    html.Hr(style={"borderColor": "#404040", "margin": "10px 0"}),
+                    html.Div([
+                        html.Strong("Visualization:", className="text-info"),
+                        msg["live_visualization"]
+                    ])
+                ]))
+            
             # Add results if present
-            if "has_results" in msg and msg.get("results_data"):
+            elif "has_results" in msg and msg.get("results_data"):
+                # Handle visualization results
+                if isinstance(msg["results_data"], dict) and msg["results_data"].get("type") == "visualization":
+                    viz_data = msg["results_data"]
+                    message_content.append(html.Div([
+                        html.Hr(style={"borderColor": "#404040", "margin": "10px 0"}),
+                        html.Div([
+                            html.Strong("Visualization:", className="text-info"),
+                            html.P(f"Chart Type: {viz_data.get('chart_type', 'Unknown').replace('_', ' ').title()}", 
+                                  className="text-light mt-2 mb-2"),
+                            html.P(f"Data: {viz_data.get('data_summary', {}).get('rows', 0)} rows, "
+                                  f"{viz_data.get('data_summary', {}).get('columns', 0)} columns", 
+                                  className="text-muted small")
+                        ])
+                    ]))
                 # Regenerate the results table from stored data
-                if isinstance(msg["results_data"], list) and len(msg["results_data"]) > 0:
+                elif isinstance(msg["results_data"], list) and len(msg["results_data"]) > 0:
                     # Convert back to DataFrame and ensure it's serializable
                     df = pd.DataFrame(msg["results_data"])
                     
@@ -661,18 +742,21 @@ def manage_database_connection(connect_clicks, db_type, host, port, db_name, use
     if not connect_clicks:
         return "", {"connected": False}, "status-indicator status-disconnected", "Not connected to database", ""
     
-    if not all([host, port, db_name, username, password]):
-        return (
-            dbc.Alert("Please fill in all database connection fields.", color="warning"),
-            {"connected": False},
-            "status-indicator status-disconnected",
-            "Not connected to database",
-            ""
-        )
-    
-    # Attempt real database connection
     try:
-        success, message = db_connection.connect(db_type, host, port, db_name, username, password)
+        if db_type == "sqlite3":
+            # Use the hardcoded SQLite database path
+            success, message = db_connection.connect(db_type, "", "", SQLITE_DB_PATH, "", "")
+        else:
+            # For other databases, check all required fields
+            if not all([host, port, db_name, username, password]):
+                return (
+                    dbc.Alert("Please fill in all database connection fields.", color="warning"),
+                    {"connected": False},
+                    "status-indicator status-disconnected",
+                    "Not connected to database",
+                    ""
+                )
+            success, message = db_connection.connect(db_type, host, port, db_name, username, password)
         
         if success:
             # Get connection info for display
@@ -869,6 +953,18 @@ def disconnect_database(n_clicks):
             ""
         )
     return no_update
+
+@app.callback(
+    [Output("db-host", "disabled"),
+     Output("db-port", "disabled"),
+     Output("db-username", "disabled"),
+     Output("db-password", "disabled"),
+     Output("db-name", "disabled")],
+    [Input("db-type", "value")]
+)
+def toggle_connection_fields(db_type):
+    is_sqlite = db_type == "sqlite3"
+    return is_sqlite, is_sqlite, is_sqlite, is_sqlite, is_sqlite
 
 if __name__ == "__main__":
     app.run_server(debug=True, host="0.0.0.0", port=8050)
