@@ -23,3 +23,4 @@ lancedb>=0.2.0
 litellm>=1.0.0
 sqlfluff>=2.3.0
 sqlglot>=20.0.0
+pillow>=10.0.0

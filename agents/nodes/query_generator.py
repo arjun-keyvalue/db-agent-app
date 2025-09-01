@@ -4,7 +4,7 @@ Query generation node using LiteLLM
 
 import logging
 from typing import Dict, Any
-import litellm
+from ..llm_client import SmartLLMClient
 from ..states import AgentState
 
 logger = logging.getLogger(__name__)

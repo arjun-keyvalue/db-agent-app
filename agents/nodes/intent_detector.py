@@ -4,7 +4,7 @@ Intent detection node for understanding user query intent
 
 import logging
 from typing import Dict, Any
-import litellm
+from ..llm_client import SmartLLMClient
 from ..states import AgentState
 
 logger = logging.getLogger(__name__)
@@ -13,8 +13,8 @@ logger = logging.getLogger(__name__)
 class IntentDetectorNode:
     """Detect user intent from natural language query"""
     
-    def __init__(self, model: str = "gpt-3.5-turbo"):
-        self.model = model
+    def __init__(self, llm_client: SmartLLMClient = None):
+        self.llm_client = llm_client or SmartLLMClient.create_from_config()
         
         # Define intent categories
         self.intent_categories = {
@@ -45,9 +45,8 @@ class IntentDetectorNode:
             # Create intent detection prompt
             intent_prompt = self._create_intent_prompt(user_query)
             
-            # Use LiteLLM for intent detection
-            response = litellm.completion(
-                model=self.model,
+            # Use Smart LLM client for intent detection
+            response = self.llm_client.completion(
                 messages=[
                     {"role": "system", "content": "You are an expert at understanding database query intentions. Analyze user queries and identify their intent."},
                     {"role": "user", "content": intent_prompt}

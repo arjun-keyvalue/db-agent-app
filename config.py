@@ -21,9 +21,31 @@ class Config:
     
     # RAG Agent Configuration
     RAG_MODEL = os.getenv('RAG_MODEL', 'gpt-3.5-turbo')
+    RAG_API_KEY = os.getenv('RAG_API_KEY', os.getenv('OPENAI_API_KEY'))  # Fallback to OPENAI_API_KEY
+    RAG_PROVIDER = os.getenv('RAG_PROVIDER', 'openai')
     LANCEDB_PATH = os.getenv('LANCEDB_PATH', './lancedb_rag')
     MAX_CORRECTIONS = int(os.getenv('MAX_CORRECTIONS', '3'))
     QUERY_TIMEOUT = int(os.getenv('QUERY_TIMEOUT', '30'))
+    
+    # Additional API Keys for different providers
+    GROQ_API_KEY = os.getenv('GROQ_API_KEY')
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    
+    @classmethod
+    def get_rag_api_key(cls):
+        """Get the appropriate API key based on RAG provider"""
+        provider = cls.RAG_PROVIDER.lower()
+        
+        if provider == 'groq':
+            return cls.GROQ_API_KEY or cls.RAG_API_KEY
+        elif provider == 'google' or provider == 'gemini':
+            return cls.GEMINI_API_KEY or cls.RAG_API_KEY
+        elif provider == 'anthropic':
+            return cls.ANTHROPIC_API_KEY or cls.RAG_API_KEY
+        elif provider == 'openai':
+            return cls.RAG_API_KEY or cls.OPENAI_API_KEY
+        else:
+            return cls.RAG_API_KEY
     
     # App Configuration
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'

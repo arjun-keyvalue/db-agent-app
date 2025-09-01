@@ -3,6 +3,7 @@ RAG Agent with Self-Correction and Validation
 Implements 4-layer validation and correction system
 """
 
+import os
 import logging
 from typing import Dict, Any, Optional
 from langgraph.graph import StateGraph, END, START
@@ -51,6 +52,9 @@ class RAGAgent(BaseAgent):
         
         # Initialize base agent
         super().__init__(checkpointer)
+        
+        # Save graph visualization
+        self._save_graph_visualization()
         
         logger.info("RAG Agent initialized with self-correction capabilities")
     
@@ -258,3 +262,28 @@ class RAGAgent(BaseAgent):
             "vector_storage": "LanceDB (embedded)",
             "llm_backend": "LiteLLM (multi-model)"
         }
+    
+    def _save_graph_visualization(self):
+        """Save the graph as a PNG visualization"""
+        try:
+            # Create agents directory if it doesn't exist
+            os.makedirs("agents", exist_ok=True)
+            
+            # Generate and save the graph visualization
+            graph_image = self.graph.get_graph().draw_mermaid_png()
+            
+            with open("agents/rag_workflow_graph.png", "wb") as f:
+                f.write(graph_image)
+            
+            logger.info("RAG workflow graph saved as agents/rag_workflow_graph.png")
+            
+        except Exception as e:
+            logger.warning(f"Could not save graph visualization: {e}")
+            # Try alternative method without mermaid
+            try:
+                graph_ascii = self.graph.get_graph().draw_ascii()
+                with open("agents/rag_workflow_graph.txt", "w") as f:
+                    f.write(graph_ascii)
+                logger.info("RAG workflow graph saved as agents/rag_workflow_graph.txt")
+            except Exception as e2:
+                logger.warning(f"Could not save ASCII graph either: {e2}")
