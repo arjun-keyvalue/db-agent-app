@@ -413,7 +413,7 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
         
         try:
             # Create query engine
-            engine_config = {"openai_api_key": Config.OPENAI_API_KEY, "db_uri": SQLITE_DB_PATH}
+            engine_config = {"openai_api_key": Config.OPENAI_API_KEY, "groq_api_key": Config.GROQ_API_KEY, "db_uri": SQLITE_DB_PATH}
             query_engine = query_engine_factory.create_query_engine(strategy, engine_config)
             
             # Create security guardrail if enabled
