@@ -275,3 +275,6 @@ Thumbs.db
 # config/local.py
 # uploads/
 # media/
+
+_transactions/
+*.lance
