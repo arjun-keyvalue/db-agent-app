@@ -234,8 +234,7 @@ app.layout = dbc.Container([
                                         options=[
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
-                                            {"label": "Visualize", "value": "visualize"}
-                                            {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
+                                            {"label": "Visualize", "value": "visualize"},
                                             {"label": "Multi-Table Join", "value": "multitablejoin"}
                                         ],
                                         value="schema",
@@ -424,7 +423,9 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
             # Get database context
             db_context = {
                 "db_type": connection.get("info", {}).get("type", "postgresql"),
-                "database": connection.get("info", {}).get("database", "unknown")
+                "database": connection.get("info", {}).get("database", "unknown"),
+                "user_input": input_value,
+                "security_enabled": security,
             }
             
             # Generate SQL query

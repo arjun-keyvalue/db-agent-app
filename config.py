@@ -18,6 +18,7 @@ class Config:
     # LLM Configuration
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
+    GROQ_API_KEY = os.getenv('GROQ_API_KEY')
     
     # App Configuration
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'

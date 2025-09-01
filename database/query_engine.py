@@ -398,9 +398,9 @@ Otherwise, generate the SQL query using ONLY the exact schema provided:
             return True
             
         except Exception as e:
-            logger.error(f"SQL validation error: {str(e)}")
+            logger.error(f"Error during SQL validation: {str(e)}")
             return False
-        
+
 
 class MultitablejoinQueryEngine(QueryEngine):
     """Multitablejoin-based query generation"""
@@ -570,14 +570,79 @@ class VisualizationQueryEngine(QueryEngine):
             return False, error_msg
 
 class BasicSecurityGuardrail(SecurityGuardrail):
-    """Basic SQL injection protection (placeholder)"""
+    """Basic SQL injection and destructive operation protection"""
     
     def get_name(self) -> str:
         return "Basic Security Guardrails"
     
     def validate_query(self, sql_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Placeholder for security validation"""
-        return True, "Security validation passed"
+        """Validate query and input for unsafe patterns, optionally with LLM classification."""
+        try:
+            user_text = (context.get("user_input") or "").lower()
+            combined_text = f" {user_text} \n {sql_query.lower()} "
+
+            unsafe_markers = [
+                " drop ",
+                " delete ",
+                " truncate ",
+                " alter ",
+                " update ",
+                " insert ",
+                " create ",
+                " grant ",
+                " revoke ",
+                " vacuum ",
+                " analyze ",
+                ";--",
+                " or 1=1",
+                " xp_cmdshell",
+                # intent synonyms
+                " destroy ",
+                " remove table",
+                " erase table",
+                " wipe ",
+                " purge ",
+                " drop table",
+            ]
+
+            # Block if any marker appears in user text or sql
+            if any(marker in combined_text for marker in unsafe_markers):
+                return False, "Blocked by guardrails: potentially destructive or unsafe database operation detected."
+
+            # Optional: LLM-based secondary classification (only if security is enabled)
+            if context.get("security_enabled", True):
+                from config import Config
+                if Config.GROQ_API_KEY:
+                    try:
+                        from langchain_groq import ChatGroq
+                        llm = ChatGroq(
+                            groq_api_key=Config.GROQ_API_KEY,
+                            model_name="llama-3.1-8b-instant",
+                            temperature=0.0,
+                            max_tokens=64,
+                        )
+                        prompt = (
+                            "Classify the following user request for database safety. "
+                            "If it could cause destructive effects (e.g., DROP/TRUNCATE/ALTER/DELETE/INSERT/CREATE/GRANT/REVOKE, privilege escalation, exfiltration), label it UNSAFE. "
+                            "If it looks like a harmless read/query request, label it SAFE. "
+                            "Respond with SAFE or UNSAFE only.\n\nRequest: " + (context.get("user_input") or "")
+                        )
+                        res = llm.invoke([
+                            ("system", "You are a strict DB safety classifier."),
+                            ("user", prompt),
+                        ])
+                        verdict = (res.content if hasattr(res, "content") else str(res)).strip().upper()
+                        if "UNSAFE" in verdict and "SAFE" not in verdict:
+                            return False, "Blocked by guardrails: the request was classified as potentially harmful to the database."
+                    except Exception:
+                        # Non-fatal: skip if classifier unavailable
+                        pass
+
+            return True, "Security validation passed"
+        except Exception as e:
+            logger.error(f"Security validation error: {e}")
+            # Fail-closed to be safe
+            return False, "Blocked by guardrails due to internal validation error"
 
 class QueryEngineFactory:
     """Factory for creating query engines"""
