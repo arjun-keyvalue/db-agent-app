@@ -435,10 +435,12 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
             if sql_success:
                 # Apply security validation if enabled
                 if security_guardrail:
-                    security_success, security_message = security_guardrail.validate_query(sql_result, db_context)
+                    security_success, security_message, modified_sql = security_guardrail.validate_query(sql_result, db_context)
                     if not security_success:
                         agent_response = f"🚫 Security Check Failed: {security_message}\n\nQuery blocked for security reasons."
                     else:
+                        # Use the modified SQL query if it was changed
+                        sql_result = modified_sql
                         # Execute the query
                         exec_success, exec_result = query_engine.execute_query(sql_result)
                         if exec_success:

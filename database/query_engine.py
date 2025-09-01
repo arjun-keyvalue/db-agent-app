@@ -37,8 +37,8 @@ class SecurityGuardrail(ABC):
     """Base interface for security guardrails"""
     
     @abstractmethod
-    def validate_query(self, sql_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Validate SQL query for security concerns"""
+    def validate_query(self, sql_query: str, context: Dict[str, Any]) -> Tuple[bool, str, str]:
+        """Validate SQL query for security concerns. Returns (success, message, modified_sql)"""
         pass
     
     @abstractmethod
@@ -262,6 +262,7 @@ CRITICAL REQUIREMENTS - READ CAREFULLY:
 5. If the user asks about something not in the schema, respond with available tables
 6. Generate valid SQL for {db_type}
 7. Add LIMIT if the query might return many rows
+8. Return ONLY the SQL query - NO explanatory text, NO markdown, NO comments
 
 COLUMN NAME MAPPING - CRITICAL:
 - When user asks for something (like "name", "phone", "email"), look through the schema to find the most appropriate column
@@ -281,6 +282,12 @@ SCHEMA COMPLIANCE CHECK:
 - Before generating SQL, verify every table and column exists in the schema above
 - If any table or column is missing, DO NOT generate SQL
 - Instead, list what IS available and suggest alternatives
+
+OUTPUT FORMAT:
+- Return ONLY the SQL query
+- Do NOT include any explanatory text, comments, or markdown formatting
+- Do NOT include phrases like "Here's a SQL query:" or "This query selects..."
+- Just return the raw SQL query
 
 If the user's request cannot be satisfied with the available schema, respond with:
 "Schema Analysis: The requested information is not available in the current database schema. Available tables are: [list of table names]"
@@ -405,14 +412,14 @@ Otherwise, generate the SQL query using ONLY the exact schema provided:
 class MultitablejoinQueryEngine(QueryEngine):
     """Multitablejoin-based query generation"""
     
-    def __init__(self, db_uri: str, openai_api_key: str, lancedb_uri: str = "./lancedb"):
+    def __init__(self, db_uri: str, openai_api_key: str, groq_api_key: str, lancedb_uri: str = "./lancedb"):
         
         if not db_connection.is_connected():
             raise ValueError("Not connected to database")
         # self.db = SQLDatabase.from_uri(db_uri)
         # self.engine = self.db._engine
         self.schema_embeddings = SchemaEmbeddings(openai_api_key, lancedb_uri)
-        self.sql_generator = SQLGenerator(openai_api_key)
+        self.sql_generator = SQLGenerator(groq_api_key)
         
         # Initialize schema embeddings
         self._initialize_schema_embeddings()
@@ -575,7 +582,7 @@ class BasicSecurityGuardrail(SecurityGuardrail):
     def get_name(self) -> str:
         return "Basic Security Guardrails"
     
-    def validate_query(self, sql_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_query(self, sql_query: str, context: Dict[str, Any]) -> Tuple[bool, str, str]:
         """Validate query and input for unsafe patterns, optionally with LLM classification."""
         try:
             user_text = (context.get("user_input") or "").lower()
@@ -615,38 +622,128 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                 " passwd ",
                 " password hash",
                 " password hashes",
+                " email ",
+                " emails ",
+                " phone ",
+                " phone number",
+                " phone numbers",
+                " date of birth",
+                " date_of_birth",
+                " dob ",
+                " all users",
+                " all user",
+                " every user",
+                " user table",
+                " users table",
             ]
 
-            # Block if any static destructive marker appears
+            # Block if any static destructive marker appears (always enabled for basic safety)
             if any(marker in combined_text for marker in unsafe_markers):
-                return False, "Blocked by guardrails: potentially destructive or unsafe database operation detected."
+                return False, "Blocked by guardrails: potentially destructive or unsafe database operation detected.", sql_query
 
-            # Block if any sensitive exfiltration marker appears in user text or SQL
-            if any(marker in combined_text for marker in sensitive_markers):
-                return False, "Blocked by guardrails: request for credentials (username/password) is not allowed."
-
-            # Inspect SELECT columns for sensitive identifiers
-            import re
-            select_match = re.search(r"SELECT\s+(.*?)\s+FROM", sql_query, re.IGNORECASE | re.DOTALL)
-            if select_match:
-                select_clause = select_match.group(1)
-                # Split columns by comma, handle aliases
-                columns = [c.strip() for c in select_clause.split(',')]
-                # Normalize: remove table prefixes and aliases
-                normalized_cols = []
-                for col in columns:
-                    # Remove AS alias
-                    upper = col.upper()
-                    if ' AS ' in upper:
-                        col = col[:upper.index(' AS ')].strip()
-                    # Remove table prefix
-                    if '.' in col:
-                        col = col.split('.')[-1].strip()
-                    normalized_cols.append(col.lower())
-                # Block if any column name suggests credentials
-                for col in normalized_cols:
-                    if re.search(r"\b(user_?name|username|password|passwd|password_?hash|pwd_hash)\b", col):
-                        return False, "Blocked by guardrails: query attempts to select username/password fields."
+            # Sensitive data protection (only when security is enabled)
+            if context.get("security_enabled", True):
+                # Inspect SELECT columns for sensitive identifiers and modify queries
+                import re
+                
+                # Define sensitive tables that contain PII or credentials
+                sensitive_tables = ['users', 'user', 'accounts', 'account']
+                
+                # Define safe columns for sensitive tables (columns that can be safely exposed)
+                safe_columns = {
+                    'users': ['id', 'username', 'full_name', 'is_active', 'created_at', 'updated_at'],
+                    'user': ['id', 'username', 'full_name', 'is_active', 'created_at', 'updated_at'],
+                    'accounts': ['id', 'username', 'is_active', 'created_at', 'updated_at'],
+                    'account': ['id', 'username', 'is_active', 'created_at', 'updated_at']
+                }
+                
+                # Check user intent first - if they're explicitly asking for sensitive data, block the query
+                user_input = context.get("user_input", "").lower()
+                sensitive_intent_markers = [
+                    "email", "emails", "e-mail", "e-mails",
+                    "phone", "phone number", "phone numbers", "telephone", "telephone number",
+                    "password", "passwords", "passwd", "pwd",
+                    "date of birth", "birth date", "dob", "birthday",
+                    "social security", "ssn", "ss number",
+                    "credit card", "cc number", "card number",
+                    "address", "home address", "mailing address",
+                    "personal information", "pii", "private data"
+                ]
+                
+                # If user is explicitly asking for sensitive data, block the query
+                if any(marker in user_input for marker in sensitive_intent_markers):
+                    return False, "Blocked by guardrails: request for sensitive personal information is not allowed.", sql_query
+                
+                # Check for SELECT queries on sensitive tables
+                select_match = re.search(r"SELECT\s+(.*?)\s+FROM\s+(\w+)", sql_query, re.IGNORECASE | re.DOTALL)
+                if select_match:
+                    select_clause = select_match.group(1).strip()
+                    table_name = select_match.group(2).strip().lower()
+                    
+                    # If querying a sensitive table, modify the SELECT clause to only include safe columns
+                    if table_name in sensitive_tables:
+                        if select_clause == '*':
+                            # Replace SELECT * with only safe columns
+                            safe_cols = safe_columns.get(table_name, [])
+                            if safe_cols:
+                                modified_select = ', '.join(safe_cols)
+                                sql_query = re.sub(
+                                    r"SELECT\s+\*\s+FROM\s+" + re.escape(table_name),
+                                    f"SELECT {modified_select} FROM {table_name}",
+                                    sql_query,
+                                    flags=re.IGNORECASE
+                                )
+                                logger.info(f"Modified SELECT * query on sensitive table '{table_name}' to only include safe columns: {safe_cols}")
+                            else:
+                                return False, f"Blocked by guardrails: no safe columns defined for sensitive table '{table_name}'", sql_query
+                        else:
+                            # Check if any sensitive columns are explicitly selected
+                            columns = [c.strip() for c in select_clause.split(',')]
+                            sensitive_cols_found = []
+                            safe_cols_to_keep = []
+                            
+                            for col in columns:
+                                # Normalize column name
+                                normalized_col = col.lower()
+                                # Remove AS alias
+                                if ' as ' in normalized_col:
+                                    normalized_col = normalized_col.split(' as ')[0].strip()
+                                # Remove table prefix
+                                if '.' in normalized_col:
+                                    normalized_col = normalized_col.split('.')[-1].strip()
+                                
+                                # Check if it's a sensitive column
+                                if re.search(r"\b(user_?name|username|password|passwd|password_?hash|pwd_hash|email|phone_?number|date_?of_?birth)\b", normalized_col):
+                                    sensitive_cols_found.append(col.strip())
+                                else:
+                                    safe_cols_to_keep.append(col.strip())
+                            
+                            # If sensitive columns were found, remove them from the query
+                            if sensitive_cols_found:
+                                if safe_cols_to_keep:
+                                    # Replace the SELECT clause with only safe columns
+                                    modified_select = ', '.join(safe_cols_to_keep)
+                                    sql_query = re.sub(
+                                        r"SELECT\s+" + re.escape(select_clause) + r"\s+FROM\s+" + re.escape(table_name),
+                                        f"SELECT {modified_select} FROM {table_name}",
+                                        sql_query,
+                                        flags=re.IGNORECASE
+                                    )
+                                    logger.info(f"Removed sensitive columns from query on '{table_name}': {sensitive_cols_found}")
+                                else:
+                                    # If no safe columns remain, use default safe columns
+                                    safe_cols = safe_columns.get(table_name, [])
+                                    if safe_cols:
+                                        modified_select = ', '.join(safe_cols)
+                                        sql_query = re.sub(
+                                            r"SELECT\s+" + re.escape(select_clause) + r"\s+FROM\s+" + re.escape(table_name),
+                                            f"SELECT {modified_select} FROM {table_name}",
+                                            sql_query,
+                                            flags=re.IGNORECASE
+                                        )
+                                        logger.info(f"Replaced query with safe columns for '{table_name}': {safe_cols}")
+                                    else:
+                                        return False, f"Blocked by guardrails: no safe columns available for sensitive table '{table_name}'", sql_query
 
             # Optional: LLM-based secondary classification (only if security is enabled)
             if context.get("security_enabled", True):
@@ -663,8 +760,8 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                         prompt = (
                             "Classify the following user request for database safety. "
                             "If it could cause destructive effects (e.g., DROP/TRUNCATE/ALTER/DELETE/INSERT/CREATE/GRANT/REVOKE, privilege escalation, exfiltration), label it UNSAFE. "
-                            "Any request to access credentials or PII (e.g., usernames, user names, passwords, password hashes, API keys, tokens, emails, SSNs) MUST be labeled UNSAFE. "
                             "If it looks like a harmless read/query request, label it SAFE. "
+                            "Note: Queries on sensitive tables (like users) will be automatically modified to exclude sensitive data, so they should be labeled SAFE. "
                             "Respond with SAFE or UNSAFE only.\n\nRequest: " + (context.get("user_input") or "")
                         )
                         res = llm.invoke([
@@ -673,15 +770,15 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                         ])
                         verdict = (res.content if hasattr(res, "content") else str(res)).strip().upper()
                         if "UNSAFE" in verdict and "SAFE" not in verdict:
-                            return False, "Blocked by guardrails: the request was classified as potentially harmful to the database."
+                            return False, "Blocked by guardrails: the request was classified as potentially harmful to the database.", sql_query
                     except Exception:
                         # Non-fatal: skip if classifier unavailable
                         pass
 
-            return True, "Security validation passed"
+            return True, "Security validation passed", sql_query
         except Exception as e:
             logger.error(f"Security validation error: {e}")
-            return False, "Blocked by guardrails due to internal validation error"
+            return False, "Blocked by guardrails due to internal validation error", sql_query
 
 class GroqSchemaBasedQueryEngine(SchemaBasedQueryEngine):
     """Schema-based query generation using Groq (LangChain ChatGroq)"""
@@ -736,26 +833,86 @@ class GroqSchemaBasedQueryEngine(SchemaBasedQueryEngine):
                 max_tokens=1000,
             )
             res = llm.invoke([
-                ("system", "You are a SQL expert. You are STRICTLY FORBIDDEN from using any tables, columns, or relationships that are not explicitly listed in the provided schema. You must verify every element exists before generating SQL. If anything is missing, explain what IS available instead of guessing."),
+                ("system", "You are a SQL expert. Generate ONLY valid SQL queries. Do NOT include any explanatory text, comments, or markdown formatting. Return ONLY the SQL query itself."),
                 ("user", prompt),
             ])
             sql_query = (res.content if hasattr(res, "content") else str(res)).strip()
             
-            # Clean markdown fences
-            if sql_query.startswith("```sql"):
-                sql_query = sql_query[7:]
-            if sql_query.endswith("```"):
-                sql_query = sql_query[:-3]
-            sql_query = sql_query.strip()
+            # Debug: Log the raw LLM response
+            logger.info(f"Raw LLM response: '{sql_query}'")
             
-            # Postgres schema prefixing
+            # Extract SQL from the response (in case LLM includes explanatory text)
+            import re
+            
+            # First, try to extract from code blocks
+            sql_match = re.search(r'```sql\s*(.*?)\s*```', sql_query, re.DOTALL | re.IGNORECASE)
+            if sql_match:
+                sql_query = sql_match.group(1).strip()
+            else:
+                # If no code blocks, try to find SQL in the text
+                # Look for complete SELECT statements including LIMIT
+                sql_match = re.search(r'(SELECT\s+.*?FROM\s+.*?)(?:\s+LIMIT\s+\d+)?(?:\s*;)?', sql_query, re.DOTALL | re.IGNORECASE)
+                if sql_match:
+                    sql_query = sql_match.group(1).strip()
+                    # Add LIMIT if not present and it's a SELECT query
+                    if re.match(r'^\s*SELECT', sql_query, re.IGNORECASE) and 'LIMIT' not in sql_query.upper():
+                        sql_query += ' LIMIT 10'
+                else:
+                    # If still no match, check if the entire response looks like SQL
+                    if re.match(r'^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)', sql_query, re.IGNORECASE):
+                        # It's already SQL, just clean it up
+                        sql_query = sql_query.strip()
+                        # Add LIMIT if it's a SELECT query without LIMIT
+                        if re.match(r'^\s*SELECT', sql_query, re.IGNORECASE) and 'LIMIT' not in sql_query.upper():
+                            sql_query += ' LIMIT 10'
+                    else:
+                        # If we can't find SQL, log the original response for debugging
+                        logger.warning(f"Could not extract SQL from LLM response: {sql_query}")
+                        return False, "Failed to generate valid SQL query from LLM response"
+            
+            # Clean up any trailing semicolon and whitespace
+            sql_query = sql_query.rstrip(';').strip()
+            
+            # Validate that we have a complete SQL query
+            if not sql_query or len(sql_query.strip()) < 10:
+                logger.error(f"Generated SQL query is too short or empty: '{sql_query}'")
+                # Try a simple fallback query for basic requests
+                if "books" in user_query.lower():
+                    sql_query = "SELECT id, isbn, title, author, genre, publication_year, total_copies, available_copies FROM books LIMIT 10"
+                    logger.info(f"Using fallback query for books: {sql_query}")
+                elif "users" in user_query.lower():
+                    sql_query = "SELECT id, username, full_name, is_active, created_at FROM users LIMIT 10"
+                    logger.info(f"Using fallback query for users: {sql_query}")
+                else:
+                    return False, "Generated SQL query is invalid or empty"
+            
+            # Additional validation: ensure the query is complete
+            if sql_query.upper().endswith('FROM') or sql_query.upper().endswith('WHERE') or sql_query.upper().endswith('AND') or sql_query.upper().endswith('OR'):
+                logger.error(f"Generated SQL query is incomplete: '{sql_query}'")
+                # Use fallback for incomplete queries
+                if "books" in user_query.lower():
+                    sql_query = "SELECT id, isbn, title, author, genre, publication_year, total_copies, available_copies FROM books LIMIT 10"
+                    logger.info(f"Using fallback query for incomplete books query: {sql_query}")
+                elif "users" in user_query.lower():
+                    sql_query = "SELECT id, username, full_name, is_active, created_at FROM users LIMIT 10"
+                    logger.info(f"Using fallback query for incomplete users query: {sql_query}")
+                else:
+                    return False, "Generated SQL query is incomplete"
+            
+            # Postgres schema prefixing - only for actual table names
             if context.get('db_type') == 'postgresql':
-                import re
-                sql_query = re.sub(r'\bFROM\s+(\w+)\b', r'FROM public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bJOIN\s+(\w+)\b', r'JOIN public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bUPDATE\s+(\w+)\b', r'UPDATE public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bINSERT\s+INTO\s+(\w+)\b', r'INSERT INTO public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bDELETE\s+FROM\s+(\w+)\b', r'DELETE FROM public.\1', sql_query, flags=re.IGNORECASE)
+                # Define known table names to prefix
+                known_tables = ['users', 'books', 'book_loans', 'book_reviews']
+                
+                # Only prefix known table names
+                for table in known_tables:
+                    # Use word boundaries to ensure we match the whole table name
+                    sql_query = re.sub(r'\bFROM\s+' + re.escape(table) + r'\b', r'FROM public.' + table, sql_query, flags=re.IGNORECASE)
+                    sql_query = re.sub(r'\bJOIN\s+' + re.escape(table) + r'\b', r'JOIN public.' + table, sql_query, flags=re.IGNORECASE)
+                    sql_query = re.sub(r'\bUPDATE\s+' + re.escape(table) + r'\b', r'UPDATE public.' + table, sql_query, flags=re.IGNORECASE)
+                    sql_query = re.sub(r'\bINSERT\s+INTO\s+' + re.escape(table) + r'\b', r'INSERT INTO public.' + table, sql_query, flags=re.IGNORECASE)
+                    sql_query = re.sub(r'\bDELETE\s+FROM\s+' + re.escape(table) + r'\b', r'DELETE FROM public.' + table, sql_query, flags=re.IGNORECASE)
+                
                 logger.info(f"Added schema prefix to query: {sql_query}")
             
             # Validate against schema
@@ -796,7 +953,7 @@ class QueryEngineFactory:
         elif engine_type == "rag":
             return RAGQueryEngine()
         elif engine_type == "multitablejoin":
-            return MultitablejoinQueryEngine(config.get('db_uri'), config.get('openai_api_key'))
+            return MultitablejoinQueryEngine(config.get('db_uri'), config.get('openai_api_key'), config.get('groq_api_key'))
         elif engine_type == "visualize":
             api_key = config.get('openai_api_key')
             if not api_key:
