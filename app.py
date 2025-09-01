@@ -9,6 +9,7 @@ from database.connection import db_connection
 from database.query_engine import query_engine_factory
 from config import Config
 import uuid
+import plotly.graph_objects as go
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -228,7 +229,8 @@ app.layout = dbc.Container([
                                         id="query-strategy",
                                         options=[
                                             {"label": "Schema-Based Querying", "value": "schema"},
-                                            {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"}
+                                            {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
+                                            {"label": "Visualize", "value": "visualize"}
                                         ],
                                         value="schema",
                                         size="sm",
@@ -420,8 +422,25 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
                         # Execute the query
                         exec_success, exec_result = query_engine.execute_query(sql_result)
                         if exec_success:
-                            # Format the result
-                            if isinstance(exec_result, pd.DataFrame):
+                            # Handle visualization results differently
+                            if strategy == "visualize" and isinstance(exec_result, dict) and 'figure' in exec_result:
+                                # Visualization result
+                                agent_response = f"Generated visualization: {exec_result.get('chart_type', 'chart').replace('_', ' ').title()}"
+                                sql_query = sql_result
+                                results = dcc.Graph(
+                                    figure=exec_result['figure'],
+                                    style={'height': '500px'},
+                                    config={'displayModeBar': True, 'displaylogo': False}
+                                )
+                                # Store visualization metadata
+                                results_data = {
+                                    'type': 'visualization',
+                                    'chart_type': exec_result.get('chart_type'),
+                                    'data_summary': exec_result.get('data_summary'),
+                                    'chart_config': exec_result.get('chart_config')
+                                }
+                            # Format regular tabular results
+                            elif isinstance(exec_result, pd.DataFrame):
                                 result_html = dbc.Table.from_dataframe(
                                     exec_result, 
                                     striped=True, 
@@ -465,7 +484,24 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
                     # Security disabled - execute directly
                     exec_success, exec_result = query_engine.execute_query(sql_result)
                     if exec_success:
-                        if isinstance(exec_result, pd.DataFrame):
+                        # Handle visualization results differently
+                        if strategy == "visualize" and isinstance(exec_result, dict) and 'figure' in exec_result:
+                            # Visualization result
+                            agent_response = f"Generated visualization: {exec_result.get('chart_type', 'chart').replace('_', ' ').title()}"
+                            sql_query = sql_result
+                            results = dcc.Graph(
+                                figure=exec_result['figure'],
+                                style={'height': '500px'},
+                                config={'displayModeBar': True, 'displaylogo': False}
+                            )
+                            # Store visualization metadata
+                            results_data = {
+                                'type': 'visualization',
+                                'chart_type': exec_result.get('chart_type'),
+                                'data_summary': exec_result.get('data_summary'),
+                                'chart_config': exec_result.get('chart_config')
+                            }
+                        elif isinstance(exec_result, pd.DataFrame):
                             result_html = dbc.Table.from_dataframe(
                                 exec_result, 
                                 striped=True, 
@@ -531,6 +567,9 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
     if 'results_data' in locals() and results_data is not None:
         agent_message["results_data"] = results_data
         agent_message["has_results"] = True  # Set the flag for rendering
+    # Store live visualization component for current message
+    if 'results' in locals() and isinstance(results, dcc.Graph):
+        agent_message["live_visualization"] = results
     
     chat_history.append(agent_message)
     
@@ -566,10 +605,34 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
                     ])
                 ]))
             
+            # Add live visualization if present (for current message)
+            if "live_visualization" in msg:
+                message_content.append(html.Div([
+                    html.Hr(style={"borderColor": "#404040", "margin": "10px 0"}),
+                    html.Div([
+                        html.Strong("Visualization:", className="text-info"),
+                        msg["live_visualization"]
+                    ])
+                ]))
+            
             # Add results if present
-            if "has_results" in msg and msg.get("results_data"):
+            elif "has_results" in msg and msg.get("results_data"):
+                # Handle visualization results
+                if isinstance(msg["results_data"], dict) and msg["results_data"].get("type") == "visualization":
+                    viz_data = msg["results_data"]
+                    message_content.append(html.Div([
+                        html.Hr(style={"borderColor": "#404040", "margin": "10px 0"}),
+                        html.Div([
+                            html.Strong("Visualization:", className="text-info"),
+                            html.P(f"Chart Type: {viz_data.get('chart_type', 'Unknown').replace('_', ' ').title()}", 
+                                  className="text-light mt-2 mb-2"),
+                            html.P(f"Data: {viz_data.get('data_summary', {}).get('rows', 0)} rows, "
+                                  f"{viz_data.get('data_summary', {}).get('columns', 0)} columns", 
+                                  className="text-muted small")
+                        ])
+                    ]))
                 # Regenerate the results table from stored data
-                if isinstance(msg["results_data"], list) and len(msg["results_data"]) > 0:
+                elif isinstance(msg["results_data"], list) and len(msg["results_data"]) > 0:
                     # Convert back to DataFrame and ensure it's serializable
                     df = pd.DataFrame(msg["results_data"])
                     
