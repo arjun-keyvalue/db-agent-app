@@ -14,6 +14,7 @@ dependencies = [
     "lancedb>=0.24.3",
     "langchain-community>=0.3.21",
     "langchain-openai>=0.3.32",
+    "langchain-groq>=0.1.3",
     "openai>=1.6.1",
     "numpy==1.26.4",
     "pandas==2.1.4",

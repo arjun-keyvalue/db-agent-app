@@ -400,7 +400,7 @@ Otherwise, generate the SQL query using ONLY the exact schema provided:
         except Exception as e:
             logger.error(f"Error during SQL validation: {str(e)}")
             return False
-
+        
 
 class MultitablejoinQueryEngine(QueryEngine):
     """Multitablejoin-based query generation"""
@@ -624,6 +624,7 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                         prompt = (
                             "Classify the following user request for database safety. "
                             "If it could cause destructive effects (e.g., DROP/TRUNCATE/ALTER/DELETE/INSERT/CREATE/GRANT/REVOKE, privilege escalation, exfiltration), label it UNSAFE. "
+                            "Any request to access credentials or PII (e.g., usernames, user names, passwords, password hashes, API keys, tokens, emails, SSNs) MUST be labeled UNSAFE. "
                             "If it looks like a harmless read/query request, label it SAFE. "
                             "Respond with SAFE or UNSAFE only.\n\nRequest: " + (context.get("user_input") or "")
                         )
@@ -651,7 +652,7 @@ class QueryEngineFactory:
     def create_query_engine(engine_type: str, config: Dict[str, Any]) -> QueryEngine:
         """Create a query engine instance"""
         if engine_type == "schema":
-            api_key = config.get('openai_api_key')
+            api_key = config.get('groq_api_key')
             if not api_key:
                 raise ValueError("OpenAI API key required for schema-based querying")
             return SchemaBasedQueryEngine(api_key)
