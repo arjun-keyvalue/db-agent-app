@@ -6,7 +6,7 @@ into data visualizations using LangChain and the database connection.
 import pandas as pd
 from typing import Dict, Any, Tuple, Optional, List
 import logging
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -21,23 +21,23 @@ class VisualizationService:
     Integrates with the existing database connection and query engine architecture.
     """
     
-    def __init__(self, db_connection, openai_api_key: str):
+    def __init__(self, db_connection, groq_api_key: str):
         """
         Initialize the visualization service.
         
         Args:
             db_connection: Database connection instance
-            openai_api_key: OpenAI API key for LLM operations
+            groq_api_key: Groq API key for LLM operations
         """
         self.db_connection = db_connection
-        self.openai_api_key = openai_api_key
+        self.groq_api_key = groq_api_key
         self.chart_detector = ChartTypeDetector()
         self.plotly_generator = PlotlyGenerator()
         
         # Initialize LangChain components
-        self.llm = ChatOpenAI(
-            api_key=openai_api_key,
-            model="gpt-3.5-turbo",
+        self.llm = ChatGroq(
+            api_key=groq_api_key,
+            model="openai/gpt-oss-120b",
             temperature=0.0
         )
         
@@ -50,31 +50,31 @@ class VisualizationService:
         """Create a LangChain for generating visualization-optimized SQL queries."""
         
         sql_template = """
-You are a SQL expert specializing in generating queries for data visualization.
-Given a user's natural language request for a visualization, generate an appropriate SQL query.
+                        You are a SQL expert specializing in generating queries for data visualization.
+                        Given a user's natural language request for a visualization, generate an appropriate SQL query.
 
-Database Schema:
-{schema_context}
+                        Database Schema:
+                        {schema_context}
 
-User Request: {user_query}
+                        User Request: {user_query}
 
-IMPORTANT GUIDELINES:
-1. Generate SQL that returns data suitable for visualization
-2. Include appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
-3. Use GROUP BY for categorical breakdowns
-4. Include ORDER BY for better chart presentation
-5. Limit results to reasonable numbers (e.g., TOP 20 for rankings)
-6. For time-based queries, ensure proper date formatting
-7. Only use tables and columns that exist in the schema above
+                        IMPORTANT GUIDELINES:
+                        1. Generate SQL that returns data suitable for visualization
+                        2. Include appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
+                        3. Use GROUP BY for categorical breakdowns
+                        4. Include ORDER BY for better chart presentation
+                        5. Limit results to reasonable numbers (e.g., TOP 20 for rankings)
+                        6. For time-based queries, ensure proper date formatting
+                        7. Only use tables and columns that exist in the schema above
 
-VISUALIZATION-SPECIFIC RULES:
-- For "distribution" queries: Return individual values or frequency counts
-- For "comparison" queries: Group by categories with aggregated values
-- For "trend" queries: Include time columns and aggregate by time periods
-- For "proportion" queries: Return categories with their counts/percentages
+                        VISUALIZATION-SPECIFIC RULES:
+                        - For "distribution" queries: Return individual values or frequency counts
+                        - For "comparison" queries: Group by categories with aggregated values
+                        - For "trend" queries: Include time columns and aggregate by time periods
+                        - For "proportion" queries: Return categories with their counts/percentages
 
-Generate ONLY the SQL query, no explanations:
-"""
+                        Generate ONLY the SQL query, no explanations:
+                        """
         
         prompt = PromptTemplate(
             input_variables=["schema_context", "user_query"],

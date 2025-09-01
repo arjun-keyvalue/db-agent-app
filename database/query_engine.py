@@ -520,8 +520,8 @@ class RAGQueryEngine(QueryEngine):
 class VisualizationQueryEngine(QueryEngine):
     """Visualization-based query generation using LangChain and Plotly"""
     
-    def __init__(self, openai_api_key: str):
-        self.openai_api_key = openai_api_key
+    def __init__(self, groq_api_key: str):
+        self.groq_api_key = groq_api_key
         self.visualization_service = None
         logger.info("Initialized VisualizationQueryEngine")
     
@@ -536,7 +536,7 @@ class VisualizationQueryEngine(QueryEngine):
         try:
             # Lazy import to avoid circular dependencies
             if self.visualization_service is None:
-                self.visualization_service = VisualizationService(db_connection, self.openai_api_key)
+                self.visualization_service = VisualizationService(db_connection, self.groq_api_key)
             
             # Validate if the query is suitable for visualization
             is_valid, validation_message = self.visualization_service.validate_visualization_request(user_query)
@@ -955,9 +955,9 @@ class QueryEngineFactory:
         elif engine_type == "multitablejoin":
             return MultitablejoinQueryEngine(config.get('db_uri'), config.get('openai_api_key'), config.get('groq_api_key'))
         elif engine_type == "visualize":
-            api_key = config.get('openai_api_key')
+            api_key = config.get('groq_api_key')
             if not api_key:
-                raise ValueError("OpenAI API key required for visualization")
+                raise ValueError("Groq API key required for visualization")
             return VisualizationQueryEngine(api_key)
         else:
             raise ValueError(f"Unknown query engine type: {engine_type}")
