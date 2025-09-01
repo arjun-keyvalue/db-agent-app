@@ -151,7 +151,7 @@ class VisualizationService:
             return False, error_msg
     
     def _build_schema_context(self) -> str:
-        """Build schema context for the LLM, similar to SchemaBasedQueryEngine."""
+        """Build schema context for the LLM"""
         try:
             if not self.db_connection.is_connected():
                 return ""

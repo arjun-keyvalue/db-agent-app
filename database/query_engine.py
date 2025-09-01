@@ -9,7 +9,9 @@ from sqlalchemy import text
 from langchain_community.utilities import SQLDatabase
 from .sqllite3.schema_embeddings import SchemaEmbeddings
 from .sqllite3.sql_generator import SQLGenerator
-
+from langchain_groq import ChatGroq
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 from services.visualization.service import VisualizationService
 
@@ -33,6 +35,155 @@ class QueryEngine(ABC):
         """Get the name of the query engine"""
         pass
 
+class SchemaBasedQueryEngine(QueryEngine):
+    """Schema-based query generation using Groq (LangChain ChatGroq)"""
+    
+    def __init__(self, groq_api_key: str):
+        self.groq_api_key = groq_api_key
+        self.conversation_context = []
+        self.current_table_context = None
+        
+        # Initialize LangChain components
+        self.llm = ChatGroq(
+            api_key=groq_api_key,
+            model="openai/gpt-oss-120b",
+            temperature=0.0
+        )
+        
+        # Create the SQL generation chain
+        self.sql_chain = self._create_sql_chain()
+        
+        logger.info("Initialized SchemaBasedQueryEngine")
+    
+    def get_name(self) -> str:
+        return "Schema-Based Querying"
+    
+    def _create_sql_chain(self) -> LLMChain:
+        """Create a LangChain for generating SQL queries from natural language."""
+        
+        sql_template = """
+        You are a SQL expert specializing in generating queries for PostgreSQL databases.
+        Given a user's natural language request, generate an appropriate SQL query.
+
+        Database Schema:
+        {schema_context}
+
+        User Request: {user_query}
+
+        IMPORTANT GUIDELINES:
+        1. Generate SQL that directly answers the user's question
+        2. Use appropriate JOINs when multiple tables are needed (ONLY WHEN REQUESTED)
+        3. Include WHERE clauses for filtering when appropriate
+        4. Use GROUP BY and aggregations (COUNT, SUM, AVG, etc.) when needed
+        5. Include ORDER BY for better result presentation
+        6. Limit results to reasonable numbers when appropriate
+        7. Only use tables and columns that exist in the schema above
+        8. Use proper PostgreSQL syntax
+        9. For table names, use the exact names from the schema (without schema prefix unless specified)
+
+        Generate ONLY the SQL query, no explanations, no markdown:
+        """
+        
+        prompt = PromptTemplate(
+            input_variables=["schema_context", "user_query"],
+            template=sql_template
+        )
+        
+        return LLMChain(llm=self.llm, prompt=prompt)
+    
+    def _build_schema_context(self) -> str:
+        """Build schema context for the LLM"""
+        try:
+            if not db_connection.is_connected():
+                return ""
+            
+            # Get tables and their schemas
+            tables_success, tables_result = db_connection.get_tables()
+            if not tables_success:
+                return ""
+            
+            schema_context = "AVAILABLE DATABASE SCHEMA:\n\n"
+            
+            for _, table_row in tables_result.iterrows():
+                table_name = table_row['table_name']
+                table_type = table_row['table_type']
+                
+                if table_type == 'BASE TABLE':
+                    # Get table schema
+                    schema_success, schema_result = db_connection.get_table_schema(table_name)
+                    if schema_success:
+                        schema_context += f"TABLE: {table_name}\n"
+                        schema_context += "COLUMNS:\n"
+                        
+                        for _, col_row in schema_result.iterrows():
+                            col_name = col_row['column_name']
+                            col_type = col_row['data_type']
+                            nullable = col_row['is_nullable']
+                            
+                            schema_context += f"  - {col_name}: {col_type}"
+                            if nullable == 'NO':
+                                schema_context += " (NOT NULL)"
+                            schema_context += "\n"
+                        
+                        schema_context += "\n"
+            
+            return schema_context
+            
+        except Exception as e:
+            logger.error(f"Failed to build schema context: {str(e)}")
+            return ""
+    
+    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
+        """Generate SQL query from natural language using LangChain."""
+        try:
+            # Get database schema context
+            schema_context = self._build_schema_context()
+            if not schema_context:
+                return False, "Unable to access database schema"
+            
+            # Use the LangChain to generate SQL
+            result = self.sql_chain.run(
+                schema_context=schema_context,
+                user_query=user_query
+            )
+            
+            # Clean up the response
+            sql_query = result.strip()
+            
+            # Remove markdown formatting if present
+            if sql_query.startswith("```sql"):
+                sql_query = sql_query[6:]
+            if sql_query.endswith("```"):
+                sql_query = sql_query[:-3]
+            
+            sql_query = sql_query.strip()
+            
+            # Add schema prefix for PostgreSQL if needed
+            if db_connection.connection_info.get('type') == 'postgresql':
+                import re
+                # Only add schema prefix if not already present
+                sql_query = re.sub(r'\bFROM\s+(\w+)\b(?!\.)', r'FROM public.\1', sql_query, flags=re.IGNORECASE)
+                sql_query = re.sub(r'\bJOIN\s+(\w+)\b(?!\.)', r'JOIN public.\1', sql_query, flags=re.IGNORECASE)
+            
+            logger.info(f"Generated SQL: {sql_query}")
+            return True, sql_query
+            
+        except Exception as e:
+            error_msg = f"SQL generation failed: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
+        """Execute the generated SQL query"""
+        try:
+            success, result = db_connection.execute_query(sql_query)
+            if success:
+                return True, result
+            else:
+                return False, result
+        except Exception as e:
+            return False, str(e)
+
 class SecurityGuardrail(ABC):
     """Base interface for security guardrails"""
     
@@ -45,369 +196,6 @@ class SecurityGuardrail(ABC):
     def get_name(self) -> str:
         """Get the name of the security guardrail"""
         pass
-
-class SchemaBasedQueryEngine(QueryEngine):
-    """Schema-based query generation using OpenAI"""
-    
-    def __init__(self, openai_api_key: str):
-        self.openai_api_key = openai_api_key
-        self.client = OpenAI(api_key=openai_api_key)
-        self.conversation_context = []  # Store conversation history
-        self.current_table_context = None  # Store current table being discussed
-        logger.info(f"Initialized SchemaBasedQueryEngine with empty conversation context")
-    
-    def get_name(self) -> str:
-        return "Schema-Based Querying"
-    
-    def _update_conversation_context(self, user_query: str, sql_query: str, table_name: str = None):
-        """Update conversation context with current interaction"""
-        logger.info(f"Adding to conversation context: User='{user_query}', SQL='{sql_query}', Table='{table_name}'")
-        
-        self.conversation_context.append({
-            'user_query': user_query,
-            'sql_query': sql_query,
-            'table_name': table_name,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-        # Keep only last 5 interactions to avoid context bloat
-        if len(self.conversation_context) > 5:
-            self.conversation_context = self.conversation_context[-5:]
-        
-        # Update current table context if we're working with a specific table
-        if table_name:
-            self.current_table_context = table_name
-            logger.info(f"Updated current table context to: {table_name}")
-        
-        logger.info(f"Conversation context now has {len(self.conversation_context)} interactions")
-    
-    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Generate SQL query using OpenAI based on database schema"""
-        logger.info(f"Starting generate_query with user_query: '{user_query}'")
-        logger.info(f"Current conversation context has {len(self.conversation_context)} interactions")
-        
-        try:
-            # Get database schema information
-            if not db_connection.is_connected():
-                return False, "Not connected to database"
-            
-            # Get tables and their schemas
-            tables_success, tables_result = db_connection.get_tables()
-            if not tables_success:
-                return False, f"Failed to get tables: {tables_result}"
-            
-            # Debug logging
-            logger.info(f"Tables found: {tables_result}")
-            
-            # Check if we have any tables
-            if tables_result.empty:
-                return False, "No tables found in the database"
-            
-            # Build schema context
-            schema_context = self._build_schema_context(tables_result)
-            
-            # Debug logging
-            logger.info(f"Schema context: {schema_context}")
-            
-            # Validate that we have actual schema data
-            if "WARNING: No tables found" in schema_context or "Available tables in this database:" not in schema_context:
-                return False, "Failed to extract database schema properly"
-            
-            # Create prompt for OpenAI
-            prompt = self._create_prompt(user_query, schema_context, context)
-            
-            # Debug logging - show exactly what's being sent to OpenAI
-            logger.info(f"=== OPENAI PROMPT ===")
-            logger.info(f"User Query: {user_query}")
-            logger.info(f"Schema Context: {schema_context}")
-            logger.info(f"Full Prompt: {prompt}")
-            logger.info(f"=== END PROMPT ===")
-            
-            # Call OpenAI API
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a SQL expert. You are STRICTLY FORBIDDEN from using any tables, columns, or relationships that are not explicitly listed in the provided schema. You must verify every element exists before generating SQL. If anything is missing, explain what IS available instead of guessing."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1000,
-                temperature=0.0
-            )
-            
-            sql_query = response.choices[0].message.content.strip()
-            
-            # Clean up the response (remove markdown if present)
-            if sql_query.startswith("```sql"):
-                sql_query = sql_query[7:]
-            if sql_query.endswith("```"):
-                sql_query = sql_query[:-3]
-            
-            sql_query = sql_query.strip()
-            
-            # Add public schema prefix to all table references for PostgreSQL
-            if context.get('db_type') == 'postgresql':
-                import re
-                # Simple pattern matching to add public. prefix to table names
-                # Match FROM table, JOIN table, etc.
-                sql_query = re.sub(r'\bFROM\s+(\w+)\b', r'FROM public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bJOIN\s+(\w+)\b', r'JOIN public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bUPDATE\s+(\w+)\b', r'UPDATE public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bINSERT\s+INTO\s+(\w+)\b', r'INSERT INTO public.\1', sql_query, flags=re.IGNORECASE)
-                sql_query = re.sub(r'\bDELETE\s+FROM\s+(\w+)\b', r'DELETE FROM public.\1', sql_query, flags=re.IGNORECASE)
-                logger.info(f"Added schema prefix to query: {sql_query}")
-            
-            # Final validation: ensure the generated SQL only uses existing tables and columns
-            if not self._validate_sql_against_schema(sql_query, tables_result):
-                return False, "Generated SQL references non-existent tables or columns. Please try rephrasing your question."
-            
-            logger.info(f"Generated SQL query: {sql_query}")
-            
-            # Update conversation context with the successful SQL generation
-            table_name = self._extract_table_name_from_sql(sql_query)
-            logger.info(f"Updating conversation context with table: {table_name}")
-            self._update_conversation_context(user_query, sql_query, table_name)
-            logger.info(f"Conversation context updated. Total interactions: {len(self.conversation_context)}")
-            
-            logger.info(f"Ending generate_query successfully. Final context has {len(self.conversation_context)} interactions")
-            return True, sql_query
-            
-        except Exception as e:
-            error_msg = f"Failed to generate SQL query: {str(e)}"
-            logger.error(error_msg)
-            
-            # Update conversation context with the error
-            self._update_conversation_context(user_query, f"ERROR: {error_msg}", None)
-            
-            logger.info(f"Ending generate_query with error. Final context has {len(self.conversation_context)} interactions")
-            return False, error_msg
-    
-    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
-        """Execute the generated SQL query"""
-        try:
-            if not db_connection.is_connected():
-                return False, "Not connected to database"
-            
-            success, result = db_connection.execute_query(sql_query)
-            return success, result
-            
-        except Exception as e:
-            error_msg = f"Failed to execute SQL query: {str(e)}"
-            logger.error(error_msg)
-            return False, error_msg
-    
-    def _build_schema_context(self, tables_df) -> str:
-        """Build comprehensive schema context for OpenAI"""
-        schema_context = "AVAILABLE DATABASE SCHEMA:\n\n"
-        
-        available_tables = []
-        
-        for _, table_row in tables_df.iterrows():
-            table_name = table_row['table_name']
-            table_type = table_row['table_type']
-            
-            if table_type == 'BASE TABLE':  # Only include actual tables, not views
-                available_tables.append(table_name)
-                # Get table schema
-                schema_success, schema_result = db_connection.get_table_schema(table_name)
-                if schema_success:
-                    logger.info(f"Building schema for table {table_name}: {schema_result}")
-                    schema_context += f"TABLE: {table_name}\n"
-                    schema_context += "COLUMNS:\n"
-                    
-                    for _, col_row in schema_result.iterrows():
-                        col_name = col_row['column_name']
-                        col_type = col_row['data_type']
-                        nullable = col_row['is_nullable']
-                        default_val = col_row['column_default']
-                        
-                        schema_context += f"  - {col_name}: {col_type}"
-                        if nullable == 'NO':
-                            schema_context += " (NOT NULL)"
-                        if default_val:
-                            schema_context += f" DEFAULT {default_val}"
-                        schema_context += "\n"
-                    
-                    schema_context += "\n"
-        
-        # Add summary of available tables
-        if available_tables:
-            schema_context += f"SUMMARY: Available tables in this database: {', '.join(available_tables)}\n\n"
-            schema_context += "IMPORTANT: You can ONLY use these tables and their columns. Do NOT reference any other tables.\n\n"
-        else:
-            schema_context += "WARNING: No tables found in this database.\n\n"
-        
-        return schema_context
-    
-    def _create_prompt(self, user_query: str, schema_context: str, context: Dict[str, Any]) -> str:
-        """Create the prompt for OpenAI"""
-        db_type = context.get('db_type', 'postgresql')
-        
-        prompt = f"""
-You are a SQL expert. Generate a SQL query based on the EXACT database schema provided below.
-
-Database Type: {db_type}
-
-{schema_context}
-
-CURRENT USER REQUEST: {user_query}
-
-CONVERSATION HISTORY (for context only - focus on current request above):
-{self._build_conversation_context()}
-
-CRITICAL REQUIREMENTS - READ CAREFULLY:
-1. ONLY use tables and columns that are EXPLICITLY listed in the schema above
-2. Do NOT assume any column names exist - use ONLY what is shown
-3. Do NOT assume any relationships between tables - use ONLY what is shown
-4. If joining tables, use ONLY columns that actually exist in both tables
-5. If the user asks about something not in the schema, respond with available tables
-6. Generate valid SQL for {db_type}
-7. Add LIMIT if the query might return many rows
-8. Return ONLY the SQL query - NO explanatory text, NO markdown, NO comments
-
-COLUMN NAME MAPPING - CRITICAL:
-- When user asks for something (like "name", "phone", "email"), look through the schema to find the most appropriate column
-- Use ONLY the exact column names that exist in the schema
-- If multiple columns could match the user's intent, choose the most relevant one
-- NEVER invent or assume column names that don't exist in the schema
-- Do NOT prefix column names with table names (e.g., use "full_name" not "user.full_name")
-- You can use AS aliases to rename columns if needed (e.g., "full_name AS name")
-
-SCHEMA-BASED COLUMN SELECTION:
-- Look at the ACTUAL column names listed in the schema above
-- Use ONLY those exact column names when generating SQL
-- Do not invent, assume, or guess column names
-- The schema shows you exactly what columns exist - use them as-is
-
-SCHEMA COMPLIANCE CHECK:
-- Before generating SQL, verify every table and column exists in the schema above
-- If any table or column is missing, DO NOT generate SQL
-- Instead, list what IS available and suggest alternatives
-
-OUTPUT FORMAT:
-- Return ONLY the SQL query
-- Do NOT include any explanatory text, comments, or markdown formatting
-- Do NOT include phrases like "Here's a SQL query:" or "This query selects..."
-- Just return the raw SQL query
-
-If the user's request cannot be satisfied with the available schema, respond with:
-"Schema Analysis: The requested information is not available in the current database schema. Available tables are: [list of table names]"
-
-Otherwise, generate the SQL query using ONLY the exact schema provided:
-"""
-        return prompt
-    
-    def _build_conversation_context(self) -> str:
-        """Build conversation context for the AI model"""
-        logger.info(f"Building conversation context. Total interactions: {len(self.conversation_context)}")
-        logger.info(f"Conversation context content: {self.conversation_context}")
-        
-        if not self.conversation_context:
-            return "This is a new conversation. No previous context available."
-        
-        context = "Previous interactions in this session:\n"
-        for i, interaction in enumerate(self.conversation_context[-3:], 1):  # Show last 3 interactions
-            context += f"{i}. User asked: '{interaction['user_query']}'\n"
-            context += f"   Generated SQL: {interaction['sql_query']}\n"
-            if interaction['table_name']:
-                context += f"   Table discussed: {interaction['table_name']}\n"
-            context += "\n"
-        
-        if self.current_table_context:
-            context += f"Context: You were previously working with the '{self.current_table_context}' table.\n"
-            context += "Use this as background context, but prioritize the CURRENT USER REQUEST above.\n"
-        
-        logger.info(f"Built conversation context: {context}")
-        return context
-    
-    def _extract_table_name_from_sql(self, sql_query: str) -> str:
-        """Extract the main table name from SQL query"""
-        import re
-        
-        # Look for FROM clause
-        from_match = re.search(r'FROM\s+(?:\w+\.)?(\w+)', sql_query, re.IGNORECASE)
-        if from_match:
-            return from_match.group(1)
-        
-        return None
-    
-    def _validate_sql_against_schema(self, sql_query: str, tables_df) -> bool:
-        """Validate that the generated SQL only uses existing tables and columns"""
-        try:
-            # Extract table names from SQL (simple regex approach)
-            import re
-            
-            # Get all available table names
-            available_tables = set(tables_df[tables_df['table_type'] == 'BASE TABLE']['table_name'].tolist())
-            
-            # Extract table names from SQL (FROM, JOIN clauses)
-            # Handle both schema.table and table formats
-            from_pattern = r'FROM\s+(?:\w+\.)?(\w+)'
-            join_pattern = r'JOIN\s+(?:\w+\.)?(\w+)'
-            
-            from_tables = re.findall(from_pattern, sql_query, re.IGNORECASE)
-            join_tables = re.findall(join_pattern, sql_query, re.IGNORECASE)
-            
-            all_referenced_tables = set(from_tables + join_tables)
-            
-            # Check if all referenced tables exist
-            for table in all_referenced_tables:
-                if table.lower() not in [t.lower() for t in available_tables]:
-                    logger.warning(f"SQL references non-existent table: {table}")
-                    return False
-            
-            # Now validate column names for each referenced table
-            for table in all_referenced_tables:
-                # Get the actual table name (remove schema prefix if present)
-                actual_table = table
-                if '.' in table:
-                    actual_table = table.split('.')[-1]
-                
-                # Get table schema to validate columns
-                schema_success, schema_result = db_connection.get_table_schema(actual_table)
-                if not schema_success:
-                    logger.warning(f"Could not get schema for table: {actual_table}")
-                    continue
-                
-                available_columns = set(schema_result['column_name'].tolist())
-                
-                # Extract column names from SELECT clause (simple approach)
-                select_pattern = r'SELECT\s+(.*?)\s+FROM'
-                select_match = re.search(select_pattern, sql_query, re.IGNORECASE | re.DOTALL)
-                if select_match:
-                    select_clause = select_match.group(1).strip()
-                    # Handle * case
-                    if select_clause == '*':
-                        continue
-                    
-                    # Extract individual column names, handling aliases and table prefixes
-                    columns = []
-                    for col in select_clause.split(','):
-                        col = col.strip()
-                        if col == '*':
-                            continue
-                        
-                        # Remove table prefix if present (e.g., "user.full_name" -> "full_name")
-                        if '.' in col:
-                            col = col.split('.')[-1]
-                        
-                        # Remove AS alias if present (e.g., "full_name AS name" -> "full_name")
-                        if ' AS ' in col.upper():
-                            col = col.split(' AS ')[0].strip()
-                        
-                        columns.append(col)
-                    
-                    for column in columns:
-                        if column.lower() not in [col.lower() for col in available_columns]:
-                            logger.warning(f"SQL references non-existent column '{column}' in table '{actual_table}'")
-                            return False
-            
-            logger.info(f"SQL validation passed for tables: {all_referenced_tables}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error during SQL validation: {str(e)}")
-            return False
-        
 
 class MultitablejoinQueryEngine(QueryEngine):
     """Multitablejoin-based query generation"""
@@ -489,33 +277,7 @@ class MultitablejoinQueryEngine(QueryEngine):
             return True, result[1]
             
         except Exception as e:
-            return False, f"Query execution failed: {str(e)}"
-
-
-
-
-
-
-
-
-
-
-
-
-
-class RAGQueryEngine(QueryEngine):
-    """RAG-based query generation (placeholder)"""
-    
-    def get_name(self) -> str:
-        return "RAG Querying"
-    
-    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
-        """Placeholder for RAG implementation"""
-        return False, "RAG querying not yet implemented"
-    
-    def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
-        """Placeholder for RAG implementation"""
-        return False, "RAG querying not yet implemented"
+            return False, f"Query execution failed: {str(e)} if 'syntax' not in str(e).lower() else 'sorry'"
 
 class VisualizationQueryEngine(QueryEngine):
     """Visualization-based query generation using LangChain and Plotly"""
@@ -780,162 +542,6 @@ class BasicSecurityGuardrail(SecurityGuardrail):
             logger.error(f"Security validation error: {e}")
             return False, "Blocked by guardrails due to internal validation error", sql_query
 
-class GroqSchemaBasedQueryEngine(SchemaBasedQueryEngine):
-    """Schema-based query generation using Groq (LangChain ChatGroq)"""
-    
-    def __init__(self, groq_api_key: str):
-        # Avoid OpenAI client setup; just initialize shared state
-        self.groq_api_key = groq_api_key
-        self.conversation_context = []
-        self.current_table_context = None
-        logger.info("Initialized GroqSchemaBasedQueryEngine with empty conversation context")
-    
-    def get_name(self) -> str:
-        return "Schema-Based Querying (Groq)"
-    
-    def generate_query(self, user_query: str, context: Dict[str, Any]) -> Tuple[bool, str]:
-        logger.info(f"Starting generate_query (Groq) with user_query: '{user_query}'")
-        logger.info(f"Current conversation context has {len(self.conversation_context)} interactions")
-        
-        try:
-            # Ensure DB connection
-            if not db_connection.is_connected():
-                return False, "Not connected to database"
-            
-            # Get schema
-            tables_success, tables_result = db_connection.get_tables()
-            if not tables_success:
-                return False, f"Failed to get tables: {tables_result}"
-            if tables_result.empty:
-                return False, "No tables found in the database"
-            
-            schema_context = self._build_schema_context(tables_result)
-            if "WARNING: No tables found" in schema_context or "Available tables in this database:" not in schema_context:
-                return False, "Failed to extract database schema properly"
-            
-            prompt = self._create_prompt(user_query, schema_context, context)
-            logger.info("=== GROQ PROMPT ===")
-            logger.info(f"User Query: {user_query}")
-            logger.info(f"Schema Context: {schema_context}")
-            logger.info(f"Full Prompt: {prompt}")
-            logger.info("=== END PROMPT ===")
-            
-            # Lazy import to avoid hard dependency unless used
-            try:
-                from langchain_groq import ChatGroq
-            except Exception as import_error:
-                return False, f"Groq dependencies not available: {import_error}"
-            
-            llm = ChatGroq(
-                groq_api_key=self.groq_api_key,
-                model_name="llama-3.1-8b-instant",
-                temperature=0.0,
-                max_tokens=1000,
-            )
-            res = llm.invoke([
-                ("system", "You are a SQL expert. Generate ONLY valid SQL queries. Do NOT include any explanatory text, comments, or markdown formatting. Return ONLY the SQL query itself."),
-                ("user", prompt),
-            ])
-            sql_query = (res.content if hasattr(res, "content") else str(res)).strip()
-            
-            # Debug: Log the raw LLM response
-            logger.info(f"Raw LLM response: '{sql_query}'")
-            
-            # Extract SQL from the response (in case LLM includes explanatory text)
-            import re
-            
-            # First, try to extract from code blocks
-            sql_match = re.search(r'```sql\s*(.*?)\s*```', sql_query, re.DOTALL | re.IGNORECASE)
-            if sql_match:
-                sql_query = sql_match.group(1).strip()
-            else:
-                # If no code blocks, try to find SQL in the text
-                # Look for complete SELECT statements including LIMIT
-                sql_match = re.search(r'(SELECT\s+.*?FROM\s+.*?)(?:\s+LIMIT\s+\d+)?(?:\s*;)?', sql_query, re.DOTALL | re.IGNORECASE)
-                if sql_match:
-                    sql_query = sql_match.group(1).strip()
-                    # Add LIMIT if not present and it's a SELECT query
-                    if re.match(r'^\s*SELECT', sql_query, re.IGNORECASE) and 'LIMIT' not in sql_query.upper():
-                        sql_query += ' LIMIT 10'
-                else:
-                    # If still no match, check if the entire response looks like SQL
-                    if re.match(r'^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER)', sql_query, re.IGNORECASE):
-                        # It's already SQL, just clean it up
-                        sql_query = sql_query.strip()
-                        # Add LIMIT if it's a SELECT query without LIMIT
-                        if re.match(r'^\s*SELECT', sql_query, re.IGNORECASE) and 'LIMIT' not in sql_query.upper():
-                            sql_query += ' LIMIT 10'
-                    else:
-                        # If we can't find SQL, log the original response for debugging
-                        logger.warning(f"Could not extract SQL from LLM response: {sql_query}")
-                        return False, "Failed to generate valid SQL query from LLM response"
-            
-            # Clean up any trailing semicolon and whitespace
-            sql_query = sql_query.rstrip(';').strip()
-            
-            # Validate that we have a complete SQL query
-            if not sql_query or len(sql_query.strip()) < 10:
-                logger.error(f"Generated SQL query is too short or empty: '{sql_query}'")
-                # Try a simple fallback query for basic requests
-                if "books" in user_query.lower():
-                    sql_query = "SELECT id, isbn, title, author, genre, publication_year, total_copies, available_copies FROM books LIMIT 10"
-                    logger.info(f"Using fallback query for books: {sql_query}")
-                elif "users" in user_query.lower():
-                    sql_query = "SELECT id, username, full_name, is_active, created_at FROM users LIMIT 10"
-                    logger.info(f"Using fallback query for users: {sql_query}")
-                else:
-                    return False, "Generated SQL query is invalid or empty"
-            
-            # Additional validation: ensure the query is complete
-            if sql_query.upper().endswith('FROM') or sql_query.upper().endswith('WHERE') or sql_query.upper().endswith('AND') or sql_query.upper().endswith('OR'):
-                logger.error(f"Generated SQL query is incomplete: '{sql_query}'")
-                # Use fallback for incomplete queries
-                if "books" in user_query.lower():
-                    sql_query = "SELECT id, isbn, title, author, genre, publication_year, total_copies, available_copies FROM books LIMIT 10"
-                    logger.info(f"Using fallback query for incomplete books query: {sql_query}")
-                elif "users" in user_query.lower():
-                    sql_query = "SELECT id, username, full_name, is_active, created_at FROM users LIMIT 10"
-                    logger.info(f"Using fallback query for incomplete users query: {sql_query}")
-                else:
-                    return False, "Generated SQL query is incomplete"
-            
-            # Postgres schema prefixing - only for actual table names
-            if context.get('db_type') == 'postgresql':
-                # Define known table names to prefix
-                known_tables = ['users', 'books', 'book_loans', 'book_reviews']
-                
-                # Only prefix known table names
-                for table in known_tables:
-                    # Use word boundaries to ensure we match the whole table name
-                    sql_query = re.sub(r'\bFROM\s+' + re.escape(table) + r'\b', r'FROM public.' + table, sql_query, flags=re.IGNORECASE)
-                    sql_query = re.sub(r'\bJOIN\s+' + re.escape(table) + r'\b', r'JOIN public.' + table, sql_query, flags=re.IGNORECASE)
-                    sql_query = re.sub(r'\bUPDATE\s+' + re.escape(table) + r'\b', r'UPDATE public.' + table, sql_query, flags=re.IGNORECASE)
-                    sql_query = re.sub(r'\bINSERT\s+INTO\s+' + re.escape(table) + r'\b', r'INSERT INTO public.' + table, sql_query, flags=re.IGNORECASE)
-                    sql_query = re.sub(r'\bDELETE\s+FROM\s+' + re.escape(table) + r'\b', r'DELETE FROM public.' + table, sql_query, flags=re.IGNORECASE)
-                
-                logger.info(f"Added schema prefix to query: {sql_query}")
-            
-            # Validate against schema
-            if not self._validate_sql_against_schema(sql_query, tables_result):
-                return False, "Generated SQL references non-existent tables or columns. Please try rephrasing your question."
-            
-            logger.info(f"Generated SQL query (Groq): {sql_query}")
-            
-            # Update conversation context
-            table_name = self._extract_table_name_from_sql(sql_query)
-            logger.info(f"Updating conversation context with table: {table_name}")
-            self._update_conversation_context(user_query, sql_query, table_name)
-            logger.info(f"Conversation context updated. Total interactions: {len(self.conversation_context)}")
-            
-            logger.info(f"Ending generate_query (Groq) successfully. Final context has {len(self.conversation_context)} interactions")
-            return True, sql_query
-        
-        except Exception as e:
-            error_msg = f"Failed to generate SQL query (Groq): {str(e)}"
-            logger.error(error_msg)
-            self._update_conversation_context(user_query, f"ERROR: {error_msg}", None)
-            return False, error_msg
-
 class QueryEngineFactory:
     """Factory for creating query engines"""
     
@@ -943,15 +549,10 @@ class QueryEngineFactory:
     def create_query_engine(engine_type: str, config: Dict[str, Any]) -> QueryEngine:
         """Create a query engine instance"""
         if engine_type == "schema":
-            groq_key = config.get("groq_api_key") or config.get("GROQ_API_KEY")
-            if groq_key:
-                return GroqSchemaBasedQueryEngine(groq_key)
-            api_key = config.get("openai_api_key")
+            api_key = config.get("groq_api_key")
             if not api_key:
-                raise ValueError("OpenAI API key required for schema-based querying")
+                raise ValueError("Groq API key required for schema-based querying")
             return SchemaBasedQueryEngine(api_key)
-        elif engine_type == "rag":
-            return RAGQueryEngine()
         elif engine_type == "multitablejoin":
             return MultitablejoinQueryEngine(config.get('db_uri'), config.get('openai_api_key'), config.get('groq_api_key'))
         elif engine_type == "visualize":
