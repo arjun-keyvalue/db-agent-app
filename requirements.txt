@@ -24,3 +24,5 @@ litellm>=1.0.0
 sqlfluff>=2.3.0
 sqlglot>=20.0.0
 pillow>=10.0.0
+sentence-transformers>=3.0.0lang
+chain-ollama>=0.1.0

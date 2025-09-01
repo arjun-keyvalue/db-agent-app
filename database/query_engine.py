@@ -527,15 +527,25 @@ class AdvancedRAGQueryEngine(QueryEngine):
             from agents.rag_agent import RAGAgent
             from config import Config
             
+            # Use the provided API key or fall back to config
+            api_key = self.openai_api_key or Config.get_rag_api_key()
+            if not api_key:
+                logger.warning("No API key provided for RAG agent, some features may not work")
+            
             self.rag_agent = RAGAgent(
                 db_connection=db_connection,
-                openai_api_key=self.openai_api_key,
+                openai_api_key=api_key,
                 model=Config.RAG_MODEL,
                 lancedb_path=Config.LANCEDB_PATH
             )
             logger.info("Advanced RAG Agent initialized successfully")
+            logger.info(f"Using embedding provider: {Config.EMBEDDING_PROVIDER}")
+            logger.info(f"Using embedding model: {Config.EMBEDDING_MODEL}")
+            
         except Exception as e:
             logger.error(f"Failed to initialize Advanced RAG Agent: {str(e)}")
+            import traceback
+            traceback.print_exc()
             self.rag_agent = None
     
     def get_name(self) -> str:

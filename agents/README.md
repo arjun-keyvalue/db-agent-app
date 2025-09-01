@@ -39,11 +39,12 @@ The RAG Agent implements a comprehensive workflow with the following components:
 ### Technology Stack
 
 - **LangGraph**: Workflow orchestration and state management
-- **LiteLLM**: Multi-model LLM support (OpenAI, Anthropic, etc.)
+- **LiteLLM**: Multi-model LLM support (OpenAI, Groq, Ollama, Anthropic, Gemini)
 - **LanceDB**: Embedded vector database for RAG context retrieval
 - **SQLFluff**: SQL linting and syntax validation
 - **SQLGlot**: SQL parsing and dialect translation
-- **OpenAI Embeddings**: Text embeddings for semantic search
+- **Multi-Provider Embeddings**: OpenAI or HuggingFace (local/free) embeddings
+- **Automatic Schema Indexing**: Database schema automatically indexed on connection
 
 ## Components
 
@@ -58,7 +59,7 @@ from agents import RAGAgent
 agent = RAGAgent(
     db_connection=db_connection,
     openai_api_key="your-api-key",
-    model="gpt-3.5-turbo",
+    model="gpt-4o-mini",
     lancedb_path="./lancedb_rag"
 )
 
@@ -138,9 +139,11 @@ graph TD
 ### RAG Context Retrieval
 
 - **Vector Storage**: Uses LanceDB for efficient similarity search
-- **Schema Indexing**: Automatically indexes database schema for retrieval
+- **Automatic Schema Indexing**: Database schema automatically indexed on connection
+- **Multi-Provider Embeddings**: OpenAI (high quality) or HuggingFace (free/local)
 - **Context Chunking**: Intelligent text chunking for optimal retrieval
 - **Relevance Scoring**: Retrieves most relevant context for query generation
+- **Sample Data Integration**: Includes sample rows for better context understanding
 
 ## Usage Examples
 
@@ -209,16 +212,44 @@ LanceDB is used as an embedded vector database that doesn't require Docker or ex
 - **High Performance**: Optimized for similarity search
 - **Persistent Storage**: Data persists between application restarts
 
-### Vector Storage Structure
+### Automatic Schema Indexing
+
+When you connect to a database, the system automatically:
+
+1. **Extracts Schema**: Tables, columns, data types, constraints
+2. **Includes Sample Data**: First 3 rows from each table for context
+3. **Creates Intelligent Chunks**: Optimized for retrieval
+4. **Generates Embeddings**: Using your chosen embedding model
+5. **Stores in LanceDB**: Fast similarity search
 
 ```python
-# Schema context is automatically chunked and stored
+# Automatically stored schema structure
 {
     "id": "schema_0",
-    "text": "TABLE: users\nCOLUMNS:\n- id: UUID (NOT NULL)\n- username: VARCHAR(50)...",
-    "vector": [0.1, 0.2, ...],  # OpenAI embedding
-    "metadata": {"type": "schema", "chunk_id": 0}
+    "text": "TABLE: users\nCOLUMNS:\n- id: UUID (NOT NULL)\n- username: VARCHAR(50)...\nSAMPLE DATA:\nid | username | email\n1 | john_doe | john@example.com",
+    "vector": [0.1, 0.2, ...],  # Embedding (OpenAI or HuggingFace)
+    "table_name": "users",
+    "document_type": "schema"
 }
+```
+
+### Schema Indexer Usage
+
+```python
+from agents.schema_indexer import get_schema_indexer
+
+# Get the global schema indexer
+indexer = get_schema_indexer()
+
+# Check indexing status
+status = indexer.get_indexing_status()
+print(f"Indexed {status['total_chunks']} chunks from {len(status['tables_indexed'])} tables")
+
+# Search schema
+results = indexer.search_schema("user information", k=5)
+
+# Get specific table info
+table_info = indexer.get_table_info("users")
 ```
 
 ## Configuration
@@ -226,30 +257,70 @@ LanceDB is used as an embedded vector database that doesn't require Docker or ex
 ### Environment Variables
 
 ```bash
-# Required
-OPENAI_API_KEY=your-openai-api-key
+# LLM Configuration
+RAG_PROVIDER=openai  # openai, groq, ollama, anthropic, gemini
+RAG_MODEL=gpt-4o-mini
+RAG_API_KEY=your-api-key
 
-# Optional
+# Embedding Configuration
+EMBEDDING_PROVIDER=openai  # openai or huggingface
+EMBEDDING_MODEL=text-embedding-3-small
+AUTO_INDEX_SCHEMA=true
+
+# Vector Storage
 LANCEDB_PATH=./lancedb_rag
-DEFAULT_MODEL=gpt-3.5-turbo
+
+# Agent Settings
 MAX_CORRECTIONS=3
 QUERY_TIMEOUT=30
+
+# Alternative API Keys
+GROQ_API_KEY=your_groq_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
-### Model Support
+### Model Support & Easy Switching
 
-Thanks to LiteLLM integration, the agent supports multiple LLM providers:
+Thanks to LiteLLM integration and the ModelSwitcher utility, the agent supports multiple LLM providers with easy runtime switching:
 
 ```python
-# OpenAI
-agent = RAGAgent(model="gpt-3.5-turbo")
-agent = RAGAgent(model="gpt-4")
+from agents import RAGAgent, ModelSwitcher, switch_to_fast_model, switch_to_powerful_model
 
-# Anthropic
-agent = RAGAgent(model="claude-3-sonnet-20240229")
+# Initialize with any model
+agent = RAGAgent(model="gpt-4o-mini")
 
-# Local models
-agent = RAGAgent(model="ollama/llama2")
+# Easy switching functions
+switch_to_fast_model(agent)        # Groq Llama 3.1 8B
+switch_to_powerful_model(agent)    # OpenAI GPT-4o
+
+# Direct model switching
+ModelSwitcher.switch_rag_model(agent, "anthropic", "claude-3.5-sonnet")
+ModelSwitcher.switch_rag_model(agent, "gemini", "gemini-1.5-pro")
+ModelSwitcher.switch_rag_model(agent, "ollama", "llama3.1")
+
+# Supported providers and models
+providers = ModelSwitcher.get_available_models()
+# Returns: openai, groq, anthropic, gemini, ollama with their models
+```
+
+### Embedding Configuration
+
+The agent supports multiple embedding providers for vector storage:
+
+```python
+# OpenAI Embeddings (High Quality)
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+RAG_API_KEY=your_openai_api_key
+
+# HuggingFace Embeddings (Free/Local)
+EMBEDDING_PROVIDER=huggingface
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+# No API key needed!
+
+# Automatic schema indexing
+AUTO_INDEX_SCHEMA=true
 ```
 
 ## Performance Considerations
@@ -340,21 +411,48 @@ The modular design allows for easy extension:
    ```bash
    # Ensure directory permissions
    chmod 755 ./lancedb_rag
+   
+   # Check if auto-indexing is enabled
+   AUTO_INDEX_SCHEMA=true
    ```
 
-2. **OpenAI API Errors**
+2. **API Key Errors**
    ```bash
-   # Check API key validity
-   export OPENAI_API_KEY=your-valid-key
+   # For OpenAI
+   export RAG_API_KEY=your-openai-key
+   
+   # For Groq
+   export GROQ_API_KEY=your-groq-key
+   
+   # For local embeddings (no key needed)
+   EMBEDDING_PROVIDER=huggingface
    ```
 
-3. **SQL Validation Failures**
+3. **Embedding Errors**
+   ```bash
+   # Test embedding system
+   python test_embedding_system.py
+   
+   # Install missing dependencies
+   pip install sentence-transformers  # for HuggingFace
+   ```
+
+4. **Model Switching Issues**
+   ```bash
+   # Test model switching
+   python test_model_switching.py
+   
+   # Check available models
+   python -c "from agents import ModelSwitcher; print(ModelSwitcher.get_available_models())"
+   ```
+
+5. **SQL Validation Failures**
    ```bash
    # Install required dependencies
-   pip install sqlfluff sqlglot
+   pip install sqlfluff sqlglot langgraph litellm lancedb
    ```
 
-### Debug Mode
+### Debug Mode & Testing
 
 Enable detailed debugging:
 
@@ -364,6 +462,22 @@ logging.getLogger('agents').setLevel(logging.DEBUG)
 
 agent = RAGAgent(...)
 result = agent.process_query("your query")
+```
+
+Test the complete system:
+
+```bash
+# Test all dependencies
+python test_dependencies.py
+
+# Test embedding system
+python test_embedding_system.py
+
+# Test RAG agent initialization
+python test_rag_init.py
+
+# Test model switching
+python test_model_switching.py
 ```
 
 ## Contributing

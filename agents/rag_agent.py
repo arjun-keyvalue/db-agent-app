@@ -47,6 +47,16 @@ class RAGAgent(BaseAgent):
         self.model = model
         self.lancedb_path = lancedb_path
         
+        # Initialize schema indexer for embeddings
+        from .schema_indexer import get_schema_indexer
+        self.schema_indexer = get_schema_indexer()
+        
+        # Auto-index schema if enabled
+        from config import Config
+        if Config.AUTO_INDEX_SCHEMA:
+            logger.info("Auto-indexing database schema...")
+            self.schema_indexer.index_database_schema(db_connection)
+        
         # Initialize nodes
         self._initialize_nodes()
         
@@ -269,8 +279,12 @@ class RAGAgent(BaseAgent):
             # Create agents directory if it doesn't exist
             os.makedirs("agents", exist_ok=True)
             
+            # Compile the graph first if not already compiled
+            if not self.compiled_graph:
+                self.compile()
+            
             # Generate and save the graph visualization
-            graph_image = self.graph.get_graph().draw_mermaid_png()
+            graph_image = self.compiled_graph.get_graph().draw_mermaid_png()
             
             with open("agents/rag_workflow_graph.png", "wb") as f:
                 f.write(graph_image)
@@ -281,9 +295,28 @@ class RAGAgent(BaseAgent):
             logger.warning(f"Could not save graph visualization: {e}")
             # Try alternative method without mermaid
             try:
-                graph_ascii = self.graph.get_graph().draw_ascii()
+                if not self.compiled_graph:
+                    self.compile()
+                graph_ascii = self.compiled_graph.get_graph().draw_ascii()
                 with open("agents/rag_workflow_graph.txt", "w") as f:
                     f.write(graph_ascii)
                 logger.info("RAG workflow graph saved as agents/rag_workflow_graph.txt")
             except Exception as e2:
                 logger.warning(f"Could not save ASCII graph either: {e2}")
+                # Create a simple text description as fallback
+                try:
+                    with open("agents/rag_workflow_description.txt", "w") as f:
+                        f.write("RAG Agent Workflow:\n")
+                        f.write("1. Intent Detection\n")
+                        f.write("2. Schema Retrieval\n")
+                        f.write("3. Context Retrieval\n")
+                        f.write("4. Query Generation\n")
+                        f.write("5. Syntactic Validation\n")
+                        f.write("6. Semantic Validation\n")
+                        f.write("7. Performance Guard\n")
+                        f.write("8. Query Execution\n")
+                        f.write("9. Self-Correction (if needed)\n")
+                        f.write("10. Output Formatting\n")
+                    logger.info("RAG workflow description saved as agents/rag_workflow_description.txt")
+                except Exception as e3:
+                    logger.warning(f"Could not save workflow description: {e3}")

@@ -27,6 +27,17 @@ class Config:
     MAX_CORRECTIONS = int(os.getenv('MAX_CORRECTIONS', '3'))
     QUERY_TIMEOUT = int(os.getenv('QUERY_TIMEOUT', '30'))
     
+    # Embedding Configuration
+    EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'ollama')  # ollama, openai, huggingface
+    EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'nomic-embed-text')
+    AUTO_INDEX_SCHEMA = os.getenv('AUTO_INDEX_SCHEMA', 'true').lower() == 'true'
+    OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    
+    # Embedding Configuration
+    EMBEDDING_PROVIDER = os.getenv('EMBEDDING_PROVIDER', 'openai')  # openai, huggingface
+    EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'text-embedding-3-small')
+    AUTO_INDEX_SCHEMA = os.getenv('AUTO_INDEX_SCHEMA', 'true').lower() == 'true'
+    
     # Additional API Keys for different providers
     GROQ_API_KEY = os.getenv('GROQ_API_KEY')
     GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')

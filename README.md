@@ -6,7 +6,7 @@ A sophisticated AI-powered database analysis tool that allows users to interact 
 
 - Python 3.8+
 - Docker and Docker Compose (for PostgreSQL setup)
-- OpenAI API key
+- OpenAI API key (or use free local embeddings)
 
 ## Quick Start
 
@@ -34,7 +34,7 @@ cd db-agent-app
 cp .env.copy .env
 ```
 
-**Important**: Edit `.env` and replace `your_actual_openai_api_key_here` with your real OpenAI API key.
+**Important**: Edit `.env` and replace `your_actual_openai_api_key_here` with your real OpenAI API key, or configure free local embeddings (see Embedding Configuration below).
 
 ### 2. Set Up Python Environment
 
@@ -184,11 +184,59 @@ The app comes with a pre-populated library database:
 
 ## Configuration
 
-### OpenAI Settings
+### LLM & Embedding Configuration
 
-- **Model**: gpt-3.5-turbo
-- **Max Tokens**: 1000
-- **Temperature**: 0 (for consistent SQL generation)
+The app supports multiple LLM providers and embedding models:
+
+#### LLM Providers
+```bash
+# OpenAI (Default)
+RAG_PROVIDER=openai
+RAG_MODEL=gpt-4o-mini
+RAG_API_KEY=your_openai_api_key_here
+
+# Groq (Fast & Free)
+RAG_PROVIDER=groq
+RAG_MODEL=llama-3.1-8b-instant
+GROQ_API_KEY=your_groq_api_key_here
+
+# Local Ollama
+RAG_PROVIDER=ollama
+RAG_MODEL=llama3.1
+# No API key needed
+
+# Anthropic Claude
+RAG_PROVIDER=anthropic
+RAG_MODEL=claude-3-5-sonnet-20241022
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Google Gemini
+RAG_PROVIDER=gemini
+RAG_MODEL=gemini-1.5-pro
+GEMINI_API_KEY=your_gemini_api_key_here
+```
+
+#### Embedding Models
+
+**OpenAI Embeddings** (High Quality)
+```bash
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-small
+RAG_API_KEY=your_openai_api_key_here
+```
+
+**Local HuggingFace Embeddings** (Free)
+```bash
+EMBEDDING_PROVIDER=huggingface
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+# No API key needed!
+```
+
+#### Automatic Schema Indexing
+```bash
+AUTO_INDEX_SCHEMA=true  # Automatically index database schema to LanceDB
+LANCEDB_PATH=./lancedb_rag  # Where to store vector embeddings
+```
 
 ## Package Management
 
@@ -225,9 +273,27 @@ pip install -e .
 ### Common Issues
 
 1. **Port conflicts**: If port 5432 is in use, update `DB_PORT` in `.env`
-2. **OpenAI API key**: Ensure your API key is valid and has sufficient credits
+2. **API key issues**: Ensure your API keys are valid and have sufficient credits
 3. **Database connection**: Wait a few seconds after `docker-compose up` before connecting
 4. **Package conflicts**: Use a fresh virtual environment if you encounter dependency issues
+5. **Embedding errors**: Run `python test_embedding_system.py` to verify embedding setup
+6. **LanceDB issues**: Check that `LANCEDB_PATH` directory is writable
+
+### Testing Your Setup
+
+```bash
+# Test all dependencies
+python test_dependencies.py
+
+# Test embedding system
+python test_embedding_system.py
+
+# Test RAG agent initialization
+python test_rag_init.py
+
+# Test model switching
+python test_model_switching.py
+```
 
 ### Environment Variables
 
@@ -242,8 +308,20 @@ DB_NAME=library
 DB_USER=postgres
 DB_PASSWORD=postgres
 
-# AI settings
-OPENAI_API_KEY=sk-your-actual-key-here
+# LLM Configuration
+RAG_PROVIDER=openai  # openai, groq, ollama, anthropic, gemini
+RAG_MODEL=gpt-4o-mini
+RAG_API_KEY=sk-your-actual-key-here
+
+# Embedding Configuration
+EMBEDDING_PROVIDER=openai  # openai or huggingface
+EMBEDDING_MODEL=text-embedding-3-small
+AUTO_INDEX_SCHEMA=true
+
+# Alternative API Keys
+GROQ_API_KEY=your_groq_api_key_here
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
 ## Development
@@ -269,9 +347,11 @@ db-agent-app/
 
 - **`SchemaBasedQueryEngine`**: Generates SQL using OpenAI and database schema
 - **`RAGAgent`**: Advanced agent with self-correction and 4-layer validation
-- **`DatabaseConnection`**: Manages database connections and queries
+- **`DatabaseConnection`**: Manages database connections and queries with auto-indexing
 - **`SecurityGuardrail`**: Validates SQL queries for security
+- **`SchemaIndexer`**: Automatically indexes database schema to LanceDB on connection
 - **`LanceDB Integration`**: Embedded vector database for RAG context retrieval
+- **`ModelSwitcher`**: Easy switching between different LLM providers and models
 - **Conversation Context**: Maintains chat history for better AI responses
 
 ### Advanced RAG Agent Features
@@ -286,12 +366,14 @@ The RAG Agent with Self-Correction implements a sophisticated 4-layer validation
 
 - **Frontend**: Dash + Bootstrap (dark theme)
 - **Backend**: Python, SQLAlchemy, Pandas
-- **AI**: OpenAI GPT-3.5/GPT-4, LangChain, LangGraph
-- **LLM Integration**: LiteLLM (multi-model support)
+- **AI**: Multi-provider LLM support via LiteLLM
+- **LLM Providers**: OpenAI, Groq, Ollama, Anthropic, Gemini
+- **Embeddings**: OpenAI, HuggingFace (local/free)
 - **Databases**: PostgreSQL, MySQL, SQLite3
 - **Visualization**: Plotly
 - **Vector DB**: LanceDB (embedded, no Docker required)
 - **SQL Validation**: SQLFluff, SQLGlot
+- **Workflow**: LangGraph for agent orchestration
 
 ## RAG Agent Architecture
 
@@ -305,12 +387,57 @@ Syntactic Validation → Semantic Validation → Performance Guards
 Query Execution → Self-Correction Loop → Formatted Output
 ```
 
-### Why LanceDB?
+### Embedding & Vector Storage
 
-LanceDB is used as the vector database because:
+**Automatic Schema Indexing**: When you connect to a database, the system automatically:
+1. Extracts database schema (tables, columns, relationships)
+2. Creates intelligent text chunks with sample data
+3. Generates embeddings using your chosen model
+4. Stores embeddings in LanceDB for fast similarity search
+5. Enables intelligent query generation with proper table/column names
+
+**LanceDB Benefits**:
 - **No Docker Required**: Embedded database that runs in-process
 - **High Performance**: Optimized for similarity search and retrieval
 - **Persistent Storage**: Data persists between application restarts
 - **Easy Setup**: No external services or configuration needed
+- **Automatic Indexing**: Schema changes are automatically re-indexed
 
-This makes the application easier to deploy and maintain while providing powerful RAG capabilities.
+**Embedding Options**:
+- **OpenAI**: High quality, ~$0.02 for typical database
+- **HuggingFace**: Free, runs locally, good quality
+
+This makes the application easier to deploy and maintain while providing powerful RAG capabilities with intelligent schema understanding.
+
+## Quick Setup Examples
+
+### Free Setup (No API Keys)
+```bash
+# Use local models only
+RAG_PROVIDER=ollama
+RAG_MODEL=llama3.1
+EMBEDDING_PROVIDER=huggingface
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+```
+
+### Production Setup (Best Quality)
+```bash
+# Use OpenAI for both LLM and embeddings
+RAG_PROVIDER=openai
+RAG_MODEL=gpt-4o
+RAG_API_KEY=your_openai_api_key_here
+EMBEDDING_PROVIDER=openai
+EMBEDDING_MODEL=text-embedding-3-large
+```
+
+### Fast & Cheap Setup
+```bash
+# Use Groq for LLM, local embeddings
+RAG_PROVIDER=groq
+RAG_MODEL=llama-3.1-8b-instant
+GROQ_API_KEY=your_groq_api_key_here
+EMBEDDING_PROVIDER=huggingface
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+```
+
+For detailed embedding configuration, see [EMBEDDING_SYSTEM.md](EMBEDDING_SYSTEM.md).

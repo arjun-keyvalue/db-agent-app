@@ -69,6 +69,10 @@ class DatabaseConnection:
             }
             
             logger.info(f"Successfully connected to {db_type} database: {db_name}")
+            
+            # Auto-index schema if enabled
+            self._auto_index_schema()
+            
             return True, f"Successfully connected to {db_type} database: {db_name}"
             
         except SQLAlchemyError as e:
@@ -208,6 +212,35 @@ class DatabaseConnection:
     def get_connection_info(self) -> Dict[str, Any]:
         """Get current connection information"""
         return self.connection_info.copy()
+
+    def _auto_index_schema(self):
+        """Automatically index database schema to LanceDB"""
+        try:
+            from config import Config
+            
+            if not Config.AUTO_INDEX_SCHEMA:
+                logger.info("Auto-indexing disabled (AUTO_INDEX_SCHEMA=false)")
+                return
+            
+            logger.info("Auto-indexing database schema to LanceDB...")
+            
+            # Import here to avoid circular imports
+            from agents.schema_indexer import auto_index_on_connection
+            
+            success = auto_index_on_connection(self)
+            if success:
+                logger.info("✓ Database schema successfully indexed to LanceDB")
+            else:
+                logger.warning("⚠ Schema indexing failed, but database connection is still active")
+                logger.info("💡 You can manually test indexing with: python test_embedding_system.py")
+                
+        except ImportError as e:
+            logger.warning(f"Schema indexing dependencies not available: {str(e)}")
+            logger.info("💡 Install missing dependencies: pip install lancedb sentence-transformers")
+        except Exception as e:
+            logger.warning(f"Auto-indexing failed: {str(e)}")
+            logger.debug("Full error details:", exc_info=True)
+            # Don't fail the connection if indexing fails
 
 # Global database connection instance
 db_connection = DatabaseConnection()
