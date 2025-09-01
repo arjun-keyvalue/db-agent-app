@@ -275,3 +275,5 @@ Thumbs.db
 # config/local.py
 # uploads/
 # media/
+
+.venv311

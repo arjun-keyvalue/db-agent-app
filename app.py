@@ -228,6 +228,7 @@ app.layout = dbc.Container([
                                         id="query-strategy",
                                         options=[
                                             {"label": "Schema-Based Querying", "value": "schema"},
+                                            {"label": "Basic Text-to-SQL", "value": "basic"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"}
                                         ],
                                         value="schema",
@@ -393,7 +394,10 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
         
         try:
             # Create query engine
-            engine_config = {"openai_api_key": Config.OPENAI_API_KEY}
+            engine_config = {
+                "OPENAI_API_KEY": Config.OPENAI_API_KEY,
+                "GEMINI_API_KEY": Config.GEMINI_API_KEY
+            }
             query_engine = query_engine_factory.create_query_engine(strategy, engine_config)
             
             # Create security guardrail if enabled
