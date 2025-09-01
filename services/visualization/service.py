@@ -50,31 +50,31 @@ class VisualizationService:
         """Create a LangChain for generating visualization-optimized SQL queries."""
         
         sql_template = """
-You are a SQL expert specializing in generating queries for data visualization.
-Given a user's natural language request for a visualization, generate an appropriate SQL query.
+                        You are a SQL expert specializing in generating queries for data visualization.
+                        Given a user's natural language request for a visualization, generate an appropriate SQL query.
 
-Database Schema:
-{schema_context}
+                        Database Schema:
+                        {schema_context}
 
-User Request: {user_query}
+                        User Request: {user_query}
 
-IMPORTANT GUIDELINES:
-1. Generate SQL that returns data suitable for visualization
-2. Include appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
-3. Use GROUP BY for categorical breakdowns
-4. Include ORDER BY for better chart presentation
-5. Limit results to reasonable numbers (e.g., TOP 20 for rankings)
-6. For time-based queries, ensure proper date formatting
-7. Only use tables and columns that exist in the schema above
+                        IMPORTANT GUIDELINES:
+                        1. Generate SQL that returns data suitable for visualization
+                        2. Include appropriate aggregations (COUNT, SUM, AVG, etc.) when needed
+                        3. Use GROUP BY for categorical breakdowns
+                        4. Include ORDER BY for better chart presentation
+                        5. Limit results to reasonable numbers (e.g., TOP 20 for rankings)
+                        6. For time-based queries, ensure proper date formatting
+                        7. Only use tables and columns that exist in the schema above
 
-VISUALIZATION-SPECIFIC RULES:
-- For "distribution" queries: Return individual values or frequency counts
-- For "comparison" queries: Group by categories with aggregated values
-- For "trend" queries: Include time columns and aggregate by time periods
-- For "proportion" queries: Return categories with their counts/percentages
+                        VISUALIZATION-SPECIFIC RULES:
+                        - For "distribution" queries: Return individual values or frequency counts
+                        - For "comparison" queries: Group by categories with aggregated values
+                        - For "trend" queries: Include time columns and aggregate by time periods
+                        - For "proportion" queries: Return categories with their counts/percentages
 
-Generate ONLY the SQL query, no explanations:
-"""
+                        Generate ONLY the SQL query, no explanations:
+                        """
         
         prompt = PromptTemplate(
             input_variables=["schema_context", "user_query"],
