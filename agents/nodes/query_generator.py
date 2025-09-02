@@ -40,9 +40,11 @@ class QueryGeneratorNode:
                 user_intent=user_intent
             )
             
-            # Generate SQL using LiteLLM
-            response = litellm.completion(
-                model=self.model,
+            # Generate SQL using SmartLLMClient
+            from ..llm_client import SmartLLMClient
+            llm_client = SmartLLMClient()
+            
+            response = llm_client.completion(
                 messages=[
                     {"role": "system", "content": "You are an expert SQL developer. Generate accurate, efficient SQL queries based on the provided schema and context."},
                     {"role": "user", "content": prompt}

@@ -48,12 +48,16 @@ class RAGAgent(BaseAgent):
         self.lancedb_path = lancedb_path
         
         # Initialize schema indexer for embeddings
-        from .schema_indexer import get_schema_indexer
-        self.schema_indexer = get_schema_indexer()
+        from .schema_indexer import SchemaIndexer
+        from config import Config
+        self.schema_indexer = SchemaIndexer(
+            lancedb_path=lancedb_path,
+            embedding_provider=Config.EMBEDDING_PROVIDER,
+            embedding_model=Config.EMBEDDING_MODEL
+        )
         
         # Auto-index schema if enabled
-        from config import Config
-        if Config.AUTO_INDEX_SCHEMA:
+        if Config.AUTO_INDEX_SCHEMA and self.schema_indexer.db:
             logger.info("Auto-indexing database schema...")
             self.schema_indexer.index_database_schema(db_connection)
         
@@ -72,7 +76,7 @@ class RAGAgent(BaseAgent):
         """Initialize all workflow nodes"""
         self.intent_detector = IntentDetectorNode(self.model)
         self.schema_retriever = SchemaRetrieverNode(self.db_connection)
-        self.context_retriever = ContextRetrieverNode(self.openai_api_key, self.lancedb_path)
+        self.context_retriever = ContextRetrieverNode(self.schema_indexer)
         self.query_generator = QueryGeneratorNode(self.model)
         self.syntactic_validator = SyntacticValidatorNode()
         self.semantic_validator = SemanticValidatorNode(self.db_connection)

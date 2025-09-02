@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 class IntentDetectorNode:
     """Detect user intent from natural language query"""
     
-    def __init__(self, llm_client: SmartLLMClient = None):
-        self.llm_client = llm_client or SmartLLMClient.create_from_config()
+    def __init__(self, model: str = "gpt-3.5-turbo"):
+        from ..llm_client import SmartLLMClient
+        self.llm_client = SmartLLMClient()
         
         # Define intent categories
         self.intent_categories = {
