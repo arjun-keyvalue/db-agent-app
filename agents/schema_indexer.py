@@ -38,14 +38,33 @@ class SchemaIndexer:
 
         # Initialize embedding function
         self.embeddings = None
-        if self.db:  # Only initialize embeddings if LanceDB works
+        if self.db is not None:  # Only initialize embeddings if LanceDB works
             try:
                 self.embeddings = self._initialize_embeddings()
-                logger.info(
-                    f"Initialized {self.embedding_provider} embeddings successfully"
-                )
+                if self.embeddings:
+                    # Test embedding to get dimensionality
+                    try:
+                        test_embedding = self.embeddings.embed_query("test")
+                        embedding_dim = len(test_embedding)
+                        logger.info(
+                            f"✅ {self.embedding_provider} embeddings ready (dim: {embedding_dim})"
+                        )
+                    except Exception as e:
+                        logger.warning(f"Embeddings initialized but test failed: {e}")
+                        logger.info(
+                            f"✅ {self.embedding_provider} embeddings initialized"
+                        )
+                else:
+                    logger.warning(
+                        f"❌ {self.embedding_provider} embeddings failed - schema indexing disabled"
+                    )
             except Exception as e:
                 logger.error(f"Failed to initialize embeddings: {e}")
+                import traceback
+
+                logger.debug(
+                    f"Embeddings initialization traceback: {traceback.format_exc()}"
+                )
                 self.embeddings = None
 
         # Text splitter for chunking
@@ -87,15 +106,36 @@ class SchemaIndexer:
             logger.error(
                 f"Failed to initialize {self.embedding_provider} embeddings: {e}"
             )
-            logger.info("Falling back to HuggingFace embeddings...")
-            return self._initialize_huggingface_embeddings()
+            # Only fallback to HuggingFace if it was the original provider or if sentence-transformers is available
+            if self.embedding_provider.lower() == "huggingface":
+                return None  # Already tried HuggingFace, don't retry
+            else:
+                logger.warning(
+                    f"Embedding provider '{self.embedding_provider}' failed. Schema indexing will be disabled."
+                )
+                logger.info(
+                    "To enable schema indexing, ensure your embedding provider is properly configured."
+                )
+                return None
 
     def _initialize_huggingface_embeddings(self):
         """Initialize HuggingFace embeddings (fallback)"""
-        model_name = "sentence-transformers/all-MiniLM-L6-v2"
-        return HuggingFaceEmbeddings(
-            model_name=model_name, model_kwargs={"device": "cpu"}
-        )
+        try:
+            model_name = "sentence-transformers/all-MiniLM-L6-v2"
+            return HuggingFaceEmbeddings(
+                model_name=model_name, model_kwargs={"device": "cpu"}
+            )
+        except ImportError as e:
+            if "sentence_transformers" in str(e):
+                logger.error(
+                    "sentence_transformers package not installed. Schema indexing will be disabled."
+                )
+                logger.info(
+                    "To enable schema indexing, install: pip install sentence-transformers"
+                )
+                return None
+            else:
+                raise e
 
     def _initialize_ollama_embeddings(self):
         """Initialize Ollama embeddings"""
@@ -138,18 +178,25 @@ class SchemaIndexer:
             return "text-embedding-3-small"
 
     def _initialize_lancedb(self):
-        """Initialize LanceDB connection"""
+        """Initialize LanceDB connection following the official docs pattern"""
         try:
             # Create directory if it doesn't exist
             os.makedirs(self.lancedb_path, exist_ok=True)
 
-            # Connect to LanceDB - simple connection following docs
+            # Connect to LanceDB - following the basic usage pattern from docs
             self.db = lancedb.connect(self.lancedb_path)
 
-            logger.info(f"LanceDB connected at: {self.lancedb_path}")
+            # Test the connection by listing tables
+            table_names = self.db.table_names()
+            logger.debug(
+                f"LanceDB connected at: {self.lancedb_path}, existing tables: {table_names}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize LanceDB: {str(e)}")
+            import traceback
+
+            logger.debug(f"LanceDB initialization traceback: {traceback.format_exc()}")
             self.db = None
 
     def index_database_schema(self, db_connection) -> bool:
@@ -218,26 +265,40 @@ class SchemaIndexer:
                                     continue
 
             if schema_documents:
-                # Create or recreate the schema table - simple approach from docs
+                # Create or recreate the schema table - following LanceDB docs pattern
                 table_name = "database_schema"
 
                 try:
                     # Drop existing table if it exists
-                    if table_name in self.db.table_names():
+                    existing_tables = self.db.table_names()
+                    if table_name in existing_tables:
                         self.db.drop_table(table_name)
+                        logger.debug(f"Dropped existing table: {table_name}")
 
-                    # Create new table with data - following LanceDB docs pattern
+                    # Create new table with data - using mode="overwrite" as per docs
                     self.schema_table = self.db.create_table(
-                        table_name, schema_documents
+                        table_name, schema_documents, mode="overwrite"
                     )
 
                     logger.info(
-                        f"Successfully indexed {len(schema_documents)} schema chunks from {len(tables_result)} tables"
+                        f"Successfully indexed {len(schema_documents)} schema chunks from {len(set(doc['table_name'] for doc in schema_documents))} tables"
                     )
-                    return True
+
+                    # Verify table was created
+                    if table_name in self.db.table_names():
+                        logger.debug(f"Verified table '{table_name}' exists in LanceDB")
+                        return True
+                    else:
+                        logger.error(
+                            f"Table '{table_name}' was not created successfully"
+                        )
+                        return False
 
                 except Exception as e:
                     logger.error(f"Failed to create LanceDB table: {e}")
+                    import traceback
+
+                    logger.debug(f"Full traceback: {traceback.format_exc()}")
                     return False
             else:
                 logger.warning("No schema documents created")
@@ -285,6 +346,19 @@ class SchemaIndexer:
     def search_schema(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search for relevant schema information"""
 
+        # Try to open the schema table if not already available
+        if not self.schema_table and self.db:
+            try:
+                if "database_schema" in self.db.table_names():
+                    self.schema_table = self.db.open_table("database_schema")
+                    logger.debug("Opened existing schema table")
+                else:
+                    logger.warning("No schema table found in LanceDB")
+                    return []
+            except Exception as e:
+                logger.error(f"Failed to open schema table: {e}")
+                return []
+
         if not self.schema_table or not self.embeddings:
             logger.warning("Schema table or embeddings not initialized")
             return []
@@ -296,10 +370,16 @@ class SchemaIndexer:
             # Search for similar chunks - following LanceDB docs pattern
             results = self.schema_table.search(query_embedding).limit(k).to_list()
 
+            logger.debug(
+                f"Found {len(results)} relevant schema chunks for query: {query}"
+            )
             return results
 
         except Exception as e:
             logger.error(f"Schema search failed: {str(e)}")
+            import traceback
+
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
             return []
 
     def get_table_info(self, table_name: str) -> List[Dict[str, Any]]:

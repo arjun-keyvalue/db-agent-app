@@ -55,7 +55,7 @@ class SchemaBasedQueryEngine(QueryEngine):
         # Create the SQL generation chain
         self.sql_chain = self._create_sql_chain()
 
-        logger.info("Initialized SchemaBasedQueryEngine")
+        logger.debug("Initialized SchemaBasedQueryEngine")
 
     def get_name(self) -> str:
         return "Schema-Based Querying"
@@ -347,9 +347,9 @@ class AdvancedRAGQueryEngine(QueryEngine):
                 model=Config.RAG_MODEL,
                 lancedb_path=Config.LANCEDB_PATH,
             )
-            logger.info("Advanced RAG Agent initialized successfully")
-            logger.info(f"Using embedding provider: {Config.EMBEDDING_PROVIDER}")
-            logger.info(f"Using embedding model: {Config.EMBEDDING_MODEL}")
+            logger.debug("Advanced RAG Agent initialized successfully")
+            logger.debug(f"Using embedding provider: {Config.EMBEDDING_PROVIDER}")
+            logger.debug(f"Using embedding model: {Config.EMBEDDING_MODEL}")
 
         except Exception as e:
             logger.error(f"Failed to initialize Advanced RAG Agent: {str(e)}")
@@ -800,7 +800,10 @@ class QueryEngineFactory:
                 raise ValueError("Groq API key required for schema-based querying")
             return SchemaBasedQueryEngine(api_key)
         elif engine_type == "rag":
-            return RAGQueryEngine()
+            api_key = config.get("openai_api_key")
+            if not api_key:
+                raise ValueError("OpenAI API key required for basic RAG")
+            return AdvancedRAGQueryEngine(api_key)
         elif engine_type == "rag_advanced":
             api_key = config.get("openai_api_key")
             if not api_key:

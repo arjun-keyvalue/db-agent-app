@@ -22,7 +22,7 @@ class SmartLLMClient:
         self.api_key = api_key
         self._setup_api_keys()
 
-        logger.info(
+        logger.debug(
             f"Initialized SmartLLMClient with model: {self.model}, provider: {self.provider}"
         )
 
@@ -37,7 +37,7 @@ class SmartLLMClient:
         if api_key:
             self.api_key = api_key
         self._setup_api_keys()
-        logger.info(f"Switched to model: {self.model}, provider: {self.provider}")
+        logger.debug(f"Switched to model: {self.model}, provider: {self.provider}")
 
     def get_model_name(self) -> str:
         """Get the full model name for LiteLLM"""
@@ -111,7 +111,7 @@ class SmartLLMClient:
                 default_params[key] = value
 
         try:
-            logger.info(f"Sending request to {self.provider} with model: {model_name}")
+            logger.debug(f"Sending request to {self.provider} with model: {model_name}")
             # Make the request
             response = litellm.completion(**default_params)
             return response
@@ -205,7 +205,7 @@ class SmartLLMClient:
             response = self.completion(test_messages, max_tokens=10)
 
             if response and response.choices:
-                logger.info(f"LLM connection test successful for {self.provider}")
+                logger.debug(f"LLM connection test successful for {self.provider}")
                 return True
             else:
                 logger.error(

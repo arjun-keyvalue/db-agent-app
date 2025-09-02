@@ -19,6 +19,7 @@ cd db-agent-app
 ```
 
 The setup script will:
+
 - Create your `.env` file
 - Let you choose between `uv` or `pip`
 - Set up the virtual environment
@@ -91,6 +92,7 @@ docker-compose up -d
 ```
 
 The database will be available at:
+
 - **Host**: localhost
 - **Port**: 5432 (or check your .env file)
 - **Database**: library
@@ -108,6 +110,7 @@ sqlite3 database/sqllite3/library.db < database/sqllite3/sqllite3_seed.sql
 ```
 
 For SQLite3, update your `.env` file:
+
 ```
 DB_TYPE=sqlite3
 ```
@@ -129,6 +132,7 @@ The app will be available at `http://localhost:8050`
 3. Use these connection details:
 
    **For PostgreSQL:**
+
    - **Database Type**: PostgreSQL
    - **Host**: localhost
    - **Port**: 5432 (or check your .env file)
@@ -137,12 +141,14 @@ The app will be available at `http://localhost:8050`
    - **Password**: postgres
 
    **For SQLite3:**
+
    - **Database Type**: SQLite3
    - Leave other fields empty (uses local file)
 
 ### 2. Choose Query Strategy
 
 Select from multiple AI-powered query approaches:
+
 - **Schema-Based**: Direct SQL generation from database schema
 - **RAG**: Retrieval-Augmented Generation (basic)
 - **RAG (Self-Correction and Validation)**: Advanced RAG with 4-layer validation system
@@ -154,6 +160,7 @@ Select from multiple AI-powered query approaches:
 Once connected, you can ask questions like:
 
 **Basic Queries:**
+
 - "Show me all users"
 - "What books are available?"
 - "Who has borrowed books?"
@@ -161,12 +168,14 @@ Once connected, you can ask questions like:
 - "What are the book ratings?"
 
 **Visualization Queries:**
+
 - "Visualize book ratings by genre"
 - "Show me a chart of books by publication year"
 - "Plot the distribution of user ages"
 - "Create a pie chart of book genres"
 
 **Advanced Queries:**
+
 - "Which users have the most overdue books?"
 - "Show me books with ratings above 4 stars"
 - "Find users who haven't returned books yet"
@@ -189,6 +198,7 @@ The app comes with a pre-populated library database:
 The app supports multiple LLM providers and embedding models:
 
 #### LLM Providers
+
 ```bash
 # OpenAI (Default)
 RAG_PROVIDER=openai
@@ -219,35 +229,65 @@ GEMINI_API_KEY=your_gemini_api_key_here
 #### Embedding Models
 
 **OpenAI Embeddings** (High Quality)
+
 ```bash
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-small
 RAG_API_KEY=your_openai_api_key_here
 ```
 
+**Local Ollama Embeddings** (Recommended - Fast & Free)
+
+```bash
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=nomic-embed-text
+OLLAMA_BASE_URL=http://localhost:11434
+# Requires: ollama pull nomic-embed-text
+```
+
 **Local HuggingFace Embeddings** (Free)
+
 ```bash
 EMBEDDING_PROVIDER=huggingface
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-# No API key needed!
+# Requires: pip install sentence-transformers
 ```
 
 #### Automatic Schema Indexing
+
 ```bash
 AUTO_INDEX_SCHEMA=true  # Automatically index database schema to LanceDB
 LANCEDB_PATH=./lancedb_rag  # Where to store vector embeddings
 ```
+
+#### Embedding Troubleshooting
+
+**If you see "LanceDB not initialized" but embeddings work fine:**
+
+- This is normal! The recent fixes ensure the RAG agent works properly
+- LanceDB connection and embeddings are now fully compatible
+- Schema indexing will work when you connect to a database
+
+**If embeddings fail to initialize:**
+
+- Check that your embedding provider is properly configured
+- For Ollama: Ensure `ollama pull nomic-embed-text` was run
+- For HuggingFace: Install with `pip install sentence-transformers`
+- For OpenAI: Verify your API key is valid
+- Schema indexing will be disabled, but the RAG agent will still work
 
 ## Package Management
 
 This project supports multiple Python package managers:
 
 ### uv (Recommended)
+
 - **Faster installation**: 10-100x faster than pip
 - **Better dependency resolution**: More reliable than pip
 - **Installation**: Visit [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/)
 
 ### pip (Traditional)
+
 - **Widely supported**: Works everywhere Python works
 - **Familiar**: Standard Python package manager
 - **Reliable**: Battle-tested and stable
@@ -260,7 +300,7 @@ Both `requirements.txt` and `pyproject.toml` are kept in sync. You can use eithe
 # Using uv
 uv pip install -r requirements.txt
 
-# Using pip  
+# Using pip
 pip install -r requirements.txt
 
 # Development install (either)
@@ -362,6 +402,7 @@ The RAG Agent with Self-Correction implements a sophisticated 4-layer validation
 2. **Layer 2: Semantic Validation** - Schema verification to prevent AI hallucinations
 3. **Layer 3: AI-Powered Self-Correction** - Execution feedback loop with iterative debugging
 4. **Layer 4: Performance Guardrails** - Automatic LIMIT clauses and safety measures
+
 ## Technology Stack
 
 - **Frontend**: Dash + Bootstrap (dark theme)
@@ -390,6 +431,7 @@ Query Execution → Self-Correction Loop → Formatted Output
 ### Embedding & Vector Storage
 
 **Automatic Schema Indexing**: When you connect to a database, the system automatically:
+
 1. Extracts database schema (tables, columns, relationships)
 2. Creates intelligent text chunks with sample data
 3. Generates embeddings using your chosen model
@@ -397,6 +439,7 @@ Query Execution → Self-Correction Loop → Formatted Output
 5. Enables intelligent query generation with proper table/column names
 
 **LanceDB Benefits**:
+
 - **No Docker Required**: Embedded database that runs in-process
 - **High Performance**: Optimized for similarity search and retrieval
 - **Persistent Storage**: Data persists between application restarts
@@ -404,6 +447,7 @@ Query Execution → Self-Correction Loop → Formatted Output
 - **Automatic Indexing**: Schema changes are automatically re-indexed
 
 **Embedding Options**:
+
 - **OpenAI**: High quality, ~$0.02 for typical database
 - **HuggingFace**: Free, runs locally, good quality
 
@@ -412,6 +456,7 @@ This makes the application easier to deploy and maintain while providing powerfu
 ## Quick Setup Examples
 
 ### Free Setup (No API Keys)
+
 ```bash
 # Use local models only
 RAG_PROVIDER=ollama
@@ -421,6 +466,7 @@ EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
 
 ### Production Setup (Best Quality)
+
 ```bash
 # Use OpenAI for both LLM and embeddings
 RAG_PROVIDER=openai
@@ -431,6 +477,7 @@ EMBEDDING_MODEL=text-embedding-3-large
 ```
 
 ### Fast & Cheap Setup
+
 ```bash
 # Use Groq for LLM, local embeddings
 RAG_PROVIDER=groq
