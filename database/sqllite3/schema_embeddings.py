@@ -1,16 +1,14 @@
 import lancedb
-from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import LanceDB
 from typing import List, Dict, Any
-import os
+from models.embedding_model import SentenceTransformerEmbeddings
+
 
 class SchemaEmbeddings:
-    def __init__(self, openai_api_key: str, lancedb_uri: str = "./lancedb"):
-        self.openai_api_key = openai_api_key
+    def __init__(self, api_key, lancedb_uri: str = "./lancedb"):
         self.lancedb_uri = lancedb_uri
-        self.embedding_fn = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            api_key=openai_api_key
+        self.embedding_fn = SentenceTransformerEmbeddings(
+            "sentence-transformers/all-MiniLM-L6-v2"
         )
         self.lancedb_connection = lancedb.connect(lancedb_uri)
         self.vectorstore = None
@@ -63,4 +61,4 @@ class SchemaEmbeddings:
             raise ValueError("Vector store not initialized. Call store_embeddings first.")
         
         retrieved_docs = self.vectorstore.similarity_search(query, k=k)
-        return [doc.page_content for doc in retrieved_docs] 
+        return [doc.page_content for doc in retrieved_docs]
