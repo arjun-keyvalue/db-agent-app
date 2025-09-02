@@ -51,7 +51,7 @@ class DatabaseConnection:
                 else:
                     # Fallback: construct absolute path to the database file
                     base_dir = os.path.dirname(os.path.abspath(__file__))
-                    db_path = os.path.join(base_dir, "sqllite3", "library.db")
+                    db_path = os.path.join(base_dir, 'sqllite3', 'employee_management.db')
                     connection_url = f"sqlite:///{db_path}"
 
             else:
