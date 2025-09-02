@@ -235,7 +235,8 @@ app.layout = dbc.Container([
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Visualize", "value": "visualize"},
-                                            {"label": "Multi-Table Join", "value": "multitablejoin"}
+                                            {"label": "Multi-Table Join", "value": "multitablejoin"},
+                                            {"label": "Simple RAG", "value": "simple_rag"}
                                         ],
                                         value="schema",
                                         size="sm",
@@ -359,6 +360,8 @@ def toggle_modal(n1, n2, n3, is_open):
     if n1 or n2 or n3:
         return not is_open
     return is_open
+
+
 
 # Callback for chat functionality
 @app.callback(
