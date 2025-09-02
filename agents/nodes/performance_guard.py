@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Dict, Any
 from ..states import AgentState
+from ..step_logger import AgentStepLogger
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +79,7 @@ class PerformanceGuardNode:
 
         # Proceed to execution
         state["next_action"] = "query_executor"
-
-        logger.info(f"Performance guardrails applied. Estimated cost: {estimated_cost}")
+        AgentStepLogger.log_validation("performance", True)
 
         return state
 

@@ -201,9 +201,7 @@ class SchemaIndexer:
 
             # Test the connection by listing tables
             table_names = self.db.table_names()
-            logger.debug(
-                f"✅ LanceDB connected at: {self.lancedb_path}, existing tables: {table_names}"
-            )
+            logger.debug(f"LanceDB connected at: {self.lancedb_path}, tables: {len(table_names)}")
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize LanceDB: {str(e)}")

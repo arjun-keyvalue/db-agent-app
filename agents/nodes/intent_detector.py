@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any
 from ..llm_client import SmartLLMClient
 from ..states import AgentState
+from ..step_logger import AgentStepLogger
 
 logger = logging.getLogger(__name__)
 
@@ -78,19 +79,14 @@ class IntentDetectorNode:
                 )
                 state["next_action"] = "output_formatter"
                 state["success"] = False
-                logger.debug("Query rejected: Not a database-related query")
+                AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), True)
                 return state
 
             state["next_action"] = "context_retriever"
-
-            logger.debug(
-                f"Intent detected: {intent_info.get('primary_intent', 'unknown')}"
-            )
+            AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), False)
 
         except Exception as e:
-            error_msg = f"LLM intent detection failed: {str(e)}"
-            logger.warning(error_msg)
-            logger.info("Falling back to keyword-based intent detection")
+            logger.debug(f"LLM intent detection failed: {str(e)}, using fallback")
 
             # Use fallback intent detection
             intent_info = self._fallback_intent_detection(user_query)
@@ -106,15 +102,11 @@ class IntentDetectorNode:
                 )
                 state["next_action"] = "output_formatter"
                 state["success"] = False
-                logger.info(
-                    "Query rejected by fallback intent detector: Not a database-related query"
-                )
+                AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), True)
                 return state
 
             state["next_action"] = "context_retriever"
-            logger.info(
-                f"Fallback intent detected: {intent_info.get('primary_intent', 'unknown')}"
-            )
+            AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), False)
 
         return state
 
@@ -131,10 +123,14 @@ class IntentDetectorNode:
         prompt = f"""
 Analyze the following database query and determine the user's intent.
 
+IMPORTANT: If the query is a greeting (hi, hello, hey, good morning, etc.) or not database-related, 
+set primary_intent to "non_database_query" and should_reject to true.
+
 USER QUERY: "{user_query}"
 
 POSSIBLE INTENTS:
 {intent_descriptions}
+- non_database_query: Query is a greeting or not related to database operations
 
 Please analyze the query and respond in the following JSON format:
 {{
@@ -149,7 +145,8 @@ Please analyze the query and respond in the following JSON format:
     "temporal_aspect": true/false,
     "estimated_tables_needed": 2,
     "key_entities": ["entity1", "entity2"],
-    "reasoning": "Brief explanation of why this intent was chosen"
+    "reasoning": "Brief explanation of why this intent was chosen",
+    "should_reject": true/false
 }}
 
 Respond with valid JSON only:
@@ -165,10 +162,19 @@ Respond with valid JSON only:
 
             # Clean up response
             response = response.strip()
+            
+            # Handle empty or invalid responses
+            if not response or len(response) < 5:
+                raise json.JSONDecodeError("Empty or too short response", response, 0)
+            
             if response.startswith("```json"):
                 response = response[7:]
             if response.endswith("```"):
                 response = response[:-3]
+            
+            response = response.strip()
+            if not response:
+                raise json.JSONDecodeError("Empty response after cleanup", response, 0)
 
             intent_data = json.loads(response)
 
@@ -254,7 +260,7 @@ Respond with valid JSON only:
         # Simple keyword-based detection for database queries
         if any(
             word in query_lower
-            for word in ["show", "list", "display", "get", "find", "select"]
+            for word in ["show", "list", "display", "get", "find", "select", "retrieve"]
         ):
             primary_intent = "data_retrieval"
         elif any(
@@ -286,6 +292,14 @@ Respond with valid JSON only:
                 "data",
                 "query",
                 "sql",
+                "sales",
+                "users",
+                "customers",
+                "orders",
+                "products",
+                "books",
+                "employees",
+                "transactions",
             ]
             if any(keyword in query_lower for keyword in db_keywords):
                 primary_intent = "data_retrieval"

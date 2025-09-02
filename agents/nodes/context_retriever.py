@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any, List
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from ..states import AgentState
+from ..step_logger import AgentStepLogger
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,9 @@ class ContextRetrieverNode:
                         for result in results
                         if result.get("text")
                     ]
-                    logger.info(
-                        f"📄 Retrieved {len(relevant_chunks)} context chunks from vector search"
-                    )
+                    AgentStepLogger.log_context_retrieval(len(relevant_chunks), user_query)
                 except Exception as search_error:
-                    logger.warning(f"LanceDB search failed: {search_error}")
+                    logger.debug(f"LanceDB search failed: {search_error}, using fallback")
                     # Fall back to basic schema retrieval
                     relevant_chunks = self._get_fallback_context(user_query)
             else:
@@ -61,23 +60,19 @@ class ContextRetrieverNode:
             if relevant_chunks:
                 database_schema = self._format_schema_from_chunks(relevant_chunks)
                 state["database_schema"] = database_schema
-                logger.info(
-                    f"📋 Using {len(relevant_chunks)} context chunks for query generation"
-                )
             else:
                 state["database_schema"] = "Schema information not available via vector search."
-                logger.info(
-                    "⚠️  No context chunks available - proceeding without schema context"
-                )
+                AgentStepLogger.log_context_retrieval(0, user_query)
             
             state["next_action"] = "query_generator"
 
         except Exception as e:
-            logger.warning(f"Context retrieval failed: {str(e)}")
+            logger.debug(f"Context retrieval failed: {str(e)}")
             # Continue without context
             state["relevant_context"] = []
             state["database_schema"] = f"Context retrieval failed: {str(e)}"
             state["next_action"] = "query_generator"
+            AgentStepLogger.log_context_retrieval(0, user_query)
 
         return state
 

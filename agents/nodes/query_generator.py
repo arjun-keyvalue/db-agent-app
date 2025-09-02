@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Any
 from ..llm_client import SmartLLMClient
 from ..states import AgentState
+from ..step_logger import AgentStepLogger
 
 logger = logging.getLogger(__name__)
 
@@ -45,19 +46,29 @@ class QueryGeneratorNode:
 
             llm_client = SmartLLMClient()
 
-            response = llm_client.completion(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert SQL developer. Generate accurate, efficient SQL queries based on the provided schema and context.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,  # Low temperature for consistent SQL generation
-                max_tokens=1000,
-            )
-
-            sql_query = response.choices[0].message.content.strip()
+            # Try LLM completion with rate limit handling
+            try:
+                response = llm_client.completion(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert SQL developer. Generate accurate, efficient SQL queries based on the provided schema and context.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,  # Low temperature for consistent SQL generation
+                    max_tokens=1000,
+                )
+            except Exception as llm_error:
+                # If rate limit or other LLM error, try basic SQL generation
+                if "rate limit" in str(llm_error).lower():
+                    logger.warning("LLM rate limited, using basic SQL generation")
+                    sql_query = self._generate_basic_sql(user_query, database_schema)
+                else:
+                    raise llm_error
+            else:
+                # LLM succeeded, extract the SQL
+                sql_query = response.choices[0].message.content.strip()
 
             # Clean up the response
             if sql_query.startswith("```sql"):
@@ -71,7 +82,7 @@ class QueryGeneratorNode:
             state["sql_query"] = sql_query
             state["next_action"] = "syntactic_validation"
 
-            logger.debug("SQL query generated successfully")
+            AgentStepLogger.log_query_generation(sql_query)
 
         except Exception as e:
             error_msg = f"Query generation failed: {str(e)}"
@@ -160,3 +171,40 @@ class QueryGeneratorNode:
         )
 
         return "\n".join(prompt_parts)
+    
+    def _generate_basic_sql(self, user_query: str, database_schema: str) -> str:
+        """Generate basic SQL when LLM is unavailable (rate limited)"""
+        query_lower = user_query.lower()
+        
+        # Extract table names from schema
+        table_names = []
+        if database_schema:
+            lines = database_schema.split('\n')
+            for line in lines:
+                if line.strip().startswith('TABLE:') or 'table' in line.lower():
+                    # Extract table name
+                    if ':' in line:
+                        table_name = line.split(':')[1].strip()
+                        if table_name and not table_name.startswith('('):
+                            table_names.append(table_name)
+        
+        # Default to a common table name if none found
+        if not table_names:
+            table_names = ['data', 'records', 'table1']
+        
+        # Try to match query to appropriate table
+        target_table = table_names[0]  # default
+        for table in table_names:
+            if table.lower() in query_lower:
+                target_table = table
+                break
+        
+        # Generate basic SQL based on query patterns
+        if any(word in query_lower for word in ['show', 'list', 'all', 'get']):
+            return f"SELECT * FROM {target_table} LIMIT 10;"
+        elif any(word in query_lower for word in ['count', 'how many']):
+            return f"SELECT COUNT(*) FROM {target_table};"
+        elif 'sum' in query_lower or 'total' in query_lower:
+            return f"SELECT SUM(*) FROM {target_table};"
+        else:
+            return f"SELECT * FROM {target_table} LIMIT 10;"

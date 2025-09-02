@@ -8,6 +8,7 @@ import sqlfluff
 import sqlglot
 from sqlglot import parse_one, ParseError
 from ..states import AgentState
+from ..step_logger import AgentStepLogger
 
 logger = logging.getLogger(__name__)
 
@@ -91,16 +92,15 @@ class SyntacticValidatorNode:
         if len(critical_errors) == 0:
             # No critical errors, proceed to semantic validation
             state["next_action"] = "semantic_validation"
+            AgentStepLogger.log_validation("syntactic", True)
             if validation_errors:
                 logger.debug(
                     f"Minor syntax issues detected but proceeding: {validation_errors}"
                 )
-            else:
-                logger.debug("SQL syntax validation passed")
         else:
             # Critical syntax errors, try correction
             state["next_action"] = "self_correction"
-            logger.warning(f"Critical SQL syntax errors: {critical_errors}")
+            AgentStepLogger.log_validation("syntactic", False, critical_errors)
 
         return state
 
@@ -223,17 +223,16 @@ class SemanticValidatorNode:
         ):
             # No critical semantic errors OR we've tried enough corrections, proceed
             state["next_action"] = "performance_guard"
+            AgentStepLogger.log_validation("semantic", True)
             if validation_errors and correction_attempts < max_corrections - 1:
                 logger.debug(
                     f"Minor semantic issues detected but proceeding: {validation_errors}"
                 )
             elif correction_attempts >= max_corrections - 1:
                 logger.debug("Max corrections reached, proceeding with query execution")
-            else:
-                logger.debug("SQL semantic validation passed")
         else:
             # Critical semantic errors and we haven't exceeded correction limit
             state["next_action"] = "self_correction"
-            logger.warning(f"Semantic validation failed: {critical_semantic_errors}")
+            AgentStepLogger.log_validation("semantic", False, critical_semantic_errors)
 
         return state

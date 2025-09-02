@@ -8,6 +8,10 @@ import litellm
 from typing import Dict, Any, List
 from config import Config
 
+# Reduce LiteLLM verbose logging
+litellm.set_verbose = False
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 

@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Dict, Any
 from ..states import AgentState
+from ..step_logger import AgentStepLogger
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +54,11 @@ class QueryExecutorNode:
                 state["next_action"] = "output_formatter"
                 state["success"] = True
 
-                logger.info(f"Query executed successfully in {execution_time:.3f}s")
-
                 # Log result summary
                 if hasattr(result, "shape"):
-                    logger.info(
-                        f"Result: {result.shape[0]} rows, {result.shape[1]} columns"
-                    )
+                    AgentStepLogger.log_execution(True, result.shape[0])
+                else:
+                    AgentStepLogger.log_execution(True)
 
             else:
                 # Query execution failed
@@ -85,8 +84,9 @@ class QueryExecutorNode:
                     state["error_message"] = f"Query execution failed: {result}"
                     state["next_action"] = "output_formatter"
                     state["success"] = False
+                    AgentStepLogger.log_execution(False, error=str(result))
                     if correction_attempts >= max_corrections:
-                        logger.warning(
+                        logger.debug(
                             f"Max correction attempts reached, returning error: {result}"
                         )
                     else:
