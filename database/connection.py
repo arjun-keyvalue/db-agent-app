@@ -205,7 +205,7 @@ class DatabaseConnection:
             return True, df
             
         except Exception as e:
-            error_msg = f"Query execution failed: {str(e)}"
+            error_msg = f"Query execution failed: {str(e) if 'syntax' not in str(e).lower() else 'sorry'}"
             logger.error(error_msg)
             return False, error_msg
     

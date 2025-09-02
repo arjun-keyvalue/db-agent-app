@@ -1,14 +1,22 @@
 from langchain_community.chat_models import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from typing import List, Tuple
+from langchain_groq import ChatGroq
 
 class SQLGenerator:
-    def __init__(self, openai_api_key: str, model_name: str = "gpt-4"):
-        self.model = ChatOpenAI(
-            model_name=model_name,
-            openai_api_key=openai_api_key,
-            temperature=0
-        )
+    def __init__(self, groq_api_key: str, model_name: str = "gpt-4"):
+        # self.model = ChatOpenAI(
+        #     model_name=model_name,
+        #     openai_api_key=openai_api_key,
+        #     temperature=0
+        # )
+        
+        self.model = ChatGroq(
+                groq_api_key=groq_api_key,
+                model_name="openai/gpt-oss-120b",
+                temperature=0.0,
+                max_tokens=1000,
+            )
         
         self.system_template = """You are an expert SQL generator.
 
