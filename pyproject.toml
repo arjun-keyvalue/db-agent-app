@@ -36,6 +36,7 @@ dependencies = [
     "matplotlib>=3.8.0",
     "langchain-groq>=0.3.7",
     "sentence-transformers>=5.1.0",
+    "litellm>=1.76.1",
 ]
 
 [tool.setuptools.packages.find]
