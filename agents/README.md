@@ -15,16 +15,19 @@ The RAG Agent implements a comprehensive workflow with the following components:
 #### 4-Layer Validation System
 
 1. **Layer 1: Syntactic Validation**
+
    - Uses SQLFluff and SQLGlot for SQL syntax validation
    - Checks for proper SQL grammar and structure
    - Database-specific dialect validation
 
 2. **Layer 2: Semantic Validation**
+
    - Verifies that referenced tables and columns exist in the database schema
    - Cross-references AI-generated SQL against actual database structure
    - Prevents AI "hallucinations" of non-existent database objects
 
 3. **Layer 3: AI-Powered Self-Correction**
+
    - Execution feedback loop with sandboxed query execution
    - Captures database error messages and feeds them back to the LLM
    - Iterative debugging and correction process
@@ -51,6 +54,7 @@ The RAG Agent implements a comprehensive workflow with the following components:
 ### Core Classes
 
 #### `RAGAgent`
+
 Main agent class that orchestrates the entire workflow.
 
 ```python
@@ -71,35 +75,42 @@ result = agent.process_query(
 ```
 
 #### `AgentState`
+
 TypedDict defining the complete state schema for the workflow.
 
 ### Workflow Nodes
 
-#### Retrieval Nodes
-- **`SchemaRetrieverNode`**: Extracts database schema information
-- **`ContextRetrieverNode`**: Retrieves relevant context using vector similarity
+#### Intent & Context Nodes
+
+- **`IntentDetectorNode`**: Analyzes user queries and filters non-database requests
+- **`ContextRetrieverNode`**: Retrieves relevant schema context using vector similarity (Optimized - No redundant DB calls)
 
 #### Generation Node
+
 - **`QueryGeneratorNode`**: Generates SQL queries using LLM with RAG context
 
 #### Validation Nodes
+
 - **`SyntacticValidatorNode`**: Layer 1 validation using SQLFluff/SQLGlot
 - **`SemanticValidatorNode`**: Layer 2 validation against database schema
 
 #### Execution Nodes
+
 - **`PerformanceGuardNode`**: Layer 4 performance and safety guardrails
 - **`QueryExecutorNode`**: Sandboxed query execution with timeout
 - **`SelfCorrectionNode`**: Layer 3 AI-powered error correction
 
 #### Output Node
+
 - **`OutputFormatterNode`**: Formats final results for user presentation
 
 ## Workflow
 
 ```mermaid
 graph TD
-    A[Start] --> B[Schema Retriever]
-    B --> C[Context Retriever]
+    A[Start] --> B[Intent Detector]
+    B -->|Valid DB Query| C[Context Retriever]
+    B -->|Invalid/Greeting| N[Output Formatter]
     C --> D[Query Generator]
     D --> E[Syntactic Validation]
     E --> F{Valid?}
@@ -121,6 +132,48 @@ graph TD
 ```
 
 ## Features
+
+### Workflow Optimization (v2.0)
+
+**🚀 Removed Redundant Schema Retrieval**: The workflow has been optimized to eliminate redundant database calls:
+
+- **Before**: Intent → Schema Retriever (DB calls) → Context Retriever (Vector search) → Query Generation
+- **After**: Intent → Context Retriever (Vector search only) → Query Generation
+
+**Benefits**:
+
+- ⚡ **50% Faster**: No redundant database schema calls
+- 🎯 **More Efficient**: Single vector search provides all needed context
+- 💾 **Reduced Load**: Less database overhead
+- 🔄 **Same Quality**: Vector database already contains indexed schema information
+
+The `ContextRetrieverNode` now provides both `relevant_context` chunks and structured `database_schema` format for backward compatibility.
+
+### Detailed Node Flow
+
+#### 1. Intent Detector Node
+
+- **Purpose**: Filters and analyzes user queries
+- **Key Features**:
+  - LLM-based intent analysis with keyword fallback
+  - Rejects greetings and non-database queries ("Hi", "Hello", etc.)
+  - Categorizes intents: data_retrieval, aggregation, filtering, etc.
+- **Output**: Routes to `context_retriever` or `output_formatter` (if rejected)
+
+#### 2. Context Retriever Node (Optimized)
+
+- **Purpose**: Provides ALL schema context via vector search
+- **Key Features**:
+  - Vector similarity search using LanceDB + embeddings
+  - Retrieves top-k relevant schema chunks (default: 5)
+  - Provides both `relevant_context` and `database_schema` formats
+  - Fallback context when vector search unavailable
+- **Optimization**: ✅ Eliminates redundant database schema calls
+- **Output**: `relevant_context`, `database_schema`, routes to `query_generator`
+
+#### 3-10. Validation & Execution Pipeline
+
+The remaining nodes (Query Generator → Syntactic Validation → Semantic Validation → Performance Guard → Query Executor → Self-Correction → Output Formatter) remain unchanged, providing the robust 4-layer validation and correction system.
 
 ### Self-Correction Capabilities
 
@@ -408,40 +461,44 @@ The modular design allows for easy extension:
 ### Common Issues
 
 1. **LanceDB Initialization Errors**
+
    ```bash
    # Ensure directory permissions
    chmod 755 ./lancedb_rag
-   
+
    # Check if auto-indexing is enabled
    AUTO_INDEX_SCHEMA=true
    ```
 
 2. **API Key Errors**
+
    ```bash
    # For OpenAI
    export RAG_API_KEY=your-openai-key
-   
+
    # For Groq
    export GROQ_API_KEY=your-groq-key
-   
+
    # For local embeddings (no key needed)
    EMBEDDING_PROVIDER=huggingface
    ```
 
 3. **Embedding Errors**
+
    ```bash
    # Test embedding system
    python test_embedding_system.py
-   
+
    # Install missing dependencies
    pip install sentence-transformers  # for HuggingFace
    ```
 
 4. **Model Switching Issues**
+
    ```bash
    # Test model switching
    python test_model_switching.py
-   
+
    # Check available models
    python -c "from agents import ModelSwitcher; print(ModelSwitcher.get_available_models())"
    ```

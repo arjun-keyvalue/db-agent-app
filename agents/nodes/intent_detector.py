@@ -81,7 +81,7 @@ class IntentDetectorNode:
                 logger.debug("Query rejected: Not a database-related query")
                 return state
 
-            state["next_action"] = "schema_retriever"
+            state["next_action"] = "context_retriever"
 
             logger.debug(
                 f"Intent detected: {intent_info.get('primary_intent', 'unknown')}"
@@ -111,7 +111,7 @@ class IntentDetectorNode:
                 )
                 return state
 
-            state["next_action"] = "schema_retriever"
+            state["next_action"] = "context_retriever"
             logger.info(
                 f"Fallback intent detected: {intent_info.get('primary_intent', 'unknown')}"
             )

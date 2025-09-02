@@ -13,7 +13,6 @@ from .base_agent import BaseAgent
 from .states import AgentState
 from .nodes import (
     IntentDetectorNode,
-    SchemaRetrieverNode,
     ContextRetrieverNode,
     QueryGeneratorNode,
     SyntacticValidatorNode,
@@ -95,7 +94,6 @@ class RAGAgent(BaseAgent):
     def _initialize_nodes(self):
         """Initialize all workflow nodes"""
         self.intent_detector = IntentDetectorNode(self.model)
-        self.schema_retriever = SchemaRetrieverNode(self.db_connection)
         self.context_retriever = ContextRetrieverNode(self.schema_indexer)
         self.query_generator = QueryGeneratorNode(self.model)
         self.syntactic_validator = SyntacticValidatorNode()
@@ -114,7 +112,6 @@ class RAGAgent(BaseAgent):
 
         # Add all nodes
         self.graph.add_node("intent_detector", self.intent_detector)
-        self.graph.add_node("schema_retriever", self.schema_retriever)
         self.graph.add_node("context_retriever", self.context_retriever)
         self.graph.add_node("query_generator", self.query_generator)
         self.graph.add_node("syntactic_validation", self.syntactic_validator)
@@ -126,12 +123,11 @@ class RAGAgent(BaseAgent):
 
         # Define the workflow edges
 
-        # Start -> Intent Detection -> Schema Retrieval
+        # Start -> Intent Detection -> Context Retrieval (Vector Search)
         self.graph.add_edge(START, "intent_detector")
-        self.graph.add_edge("intent_detector", "schema_retriever")
+        self.graph.add_edge("intent_detector", "context_retriever")
 
-        # Schema -> Context -> Query Generation
-        self.graph.add_edge("schema_retriever", "context_retriever")
+        # Context -> Query Generation (Skip redundant schema retrieval)
         self.graph.add_edge("context_retriever", "query_generator")
 
         # Query Generation -> Syntactic Validation
