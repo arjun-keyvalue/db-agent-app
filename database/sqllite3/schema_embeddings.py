@@ -55,7 +55,7 @@ class SchemaEmbeddings:
             embedding=self.embedding_fn
         )
 
-    def get_relevant_chunks(self, query: str, k: int = 4) -> List[str]:
+    def get_relevant_chunks(self, query: str, k: int = 6) -> List[str]:
         """Retrieve relevant schema chunks for a query"""
         if not self.vectorstore:
             raise ValueError("Vector store not initialized. Call store_embeddings first.")

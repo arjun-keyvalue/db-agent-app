@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 import os
 
 # Add the hardcoded SQLite3 database path
-SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'sqllite3', 'library.db')
+SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'sqllite3', 'employee_management.db')
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
