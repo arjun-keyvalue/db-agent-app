@@ -13,9 +13,9 @@ The visualization module converts natural language queries into interactive char
 
 Here are some possible user queries and their expected chart types:
 
-- **"Show me book distribution by genre"** → Pie Chart
-- **"Compare ratings across different authors"** → Bar Chart
-- **"Compare book popularity vs publication year"** → Scatter Plot
+- **"Show me employee distribution by department"** → Bar Chart
+- **"Compare average salaries across different roles"** → Bar Chart
+- **"Compare Salary vs performance rating"** → Scatter Plot
 
 ## Architecture
 
