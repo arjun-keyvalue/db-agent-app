@@ -123,9 +123,18 @@ class RAGAgent(BaseAgent):
 
         # Define the workflow edges
 
-        # Start -> Intent Detection -> Context Retrieval (Vector Search)
+        # Start -> Intent Detection
         self.graph.add_edge(START, "intent_detector")
-        self.graph.add_edge("intent_detector", "context_retriever")
+
+        # Intent Detection -> [Context Retrieval | Output Formatter]
+        self.graph.add_conditional_edges(
+            "intent_detector",
+            lambda state: state.get("next_action", ""),
+            {
+                "context_retriever": "context_retriever",
+                "output_formatter": "output_formatter",
+            },
+        )
 
         # Context -> Query Generation (Skip redundant schema retrieval)
         self.graph.add_edge("context_retriever", "query_generator")
