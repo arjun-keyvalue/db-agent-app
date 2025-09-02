@@ -380,6 +380,7 @@ class AdvancedRAGQueryEngine(QueryEngine):
                 user_query=user_query,
                 database_type=database_type,
                 max_corrections=Config.MAX_CORRECTIONS,
+                security_enabled=context.get("security_enabled", True),
             )
 
             # Store the full result for execute_query
@@ -396,18 +397,21 @@ class AdvancedRAGQueryEngine(QueryEngine):
             return False, error_msg
 
     def execute_query(self, sql_query: str) -> Tuple[bool, Any]:
-        """Return the result from RAG agent processing"""
-        if hasattr(self, "_last_result") and self._last_result:
-            result = self._last_result
-            self._last_result = None  # Clear after use
-
-            if result["success"] and result["result"] is not None:
-                return True, result["result"]
+        """Execute the provided SQL query directly to respect security guardrail modifications"""
+        try:
+            # Always execute the provided SQL query directly to ensure security guardrail modifications are respected
+            # This is important because the security guardrail may have modified the query to exclude sensitive columns
+            success, result = db_connection.execute_query(sql_query)
+            
+            if success:
+                return True, result
             else:
-                return False, result.get("error_message", "Query execution failed")
-        else:
-            # Fallback to direct execution
-            return db_connection.execute_query(sql_query)
+                return False, result
+                
+        except Exception as e:
+            error_msg = f"Query execution failed: {str(e)}"
+            logger.error(error_msg)
+            return False, error_msg
 
 
 class VisualizationQueryEngine(QueryEngine):

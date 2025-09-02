@@ -18,6 +18,7 @@ from .nodes import (
     SyntacticValidatorNode,
     SemanticValidatorNode,
     PerformanceGuardNode,
+    SecurityGuardNode,
     QueryExecutorNode,
     SelfCorrectionNode,
     OutputFormatterNode,
@@ -99,6 +100,7 @@ class RAGAgent(BaseAgent):
         self.syntactic_validator = SyntacticValidatorNode()
         self.semantic_validator = SemanticValidatorNode(self.db_connection)
         self.performance_guard = PerformanceGuardNode()
+        self.security_guard = SecurityGuardNode()
         self.query_executor = QueryExecutorNode(self.db_connection)
         self.self_corrector = SelfCorrectionNode(self.model)
         self.output_formatter = OutputFormatterNode()
@@ -117,6 +119,7 @@ class RAGAgent(BaseAgent):
         self.graph.add_node("syntactic_validation", self.syntactic_validator)
         self.graph.add_node("semantic_validation", self.semantic_validator)
         self.graph.add_node("performance_guard", self.performance_guard)
+        self.graph.add_node("security_guard", self.security_guard)
         self.graph.add_node("query_executor", self.query_executor)
         self.graph.add_node("self_correction", self.self_corrector)
         self.graph.add_node("output_formatter", self.output_formatter)
@@ -162,9 +165,12 @@ class RAGAgent(BaseAgent):
             },
         )
 
-        # Performance Guard -> [Query Executor | Self-Correction]
+        # Performance Guard -> Security Guard
+        self.graph.add_edge("performance_guard", "security_guard")
+
+        # Security Guard -> [Query Executor | Self-Correction]
         self.graph.add_conditional_edges(
-            "performance_guard",
+            "security_guard",
             lambda state: state.get("next_action", ""),
             {"query_executor": "query_executor", "self_correction": "self_correction"},
         )
@@ -197,6 +203,7 @@ class RAGAgent(BaseAgent):
         user_query: str,
         database_type: str = "postgresql",
         max_corrections: int = 3,
+        security_enabled: bool = True,
     ) -> Dict[str, Any]:
         """
         Process a user query through the RAG agent workflow
@@ -205,6 +212,7 @@ class RAGAgent(BaseAgent):
             user_query: Natural language query from user
             database_type: Type of database (postgresql, mysql, sqlite3)
             max_corrections: Maximum number of self-correction attempts
+            security_enabled: Whether security guardrails should be applied
 
         Returns:
             Dict containing results, SQL query, and metadata
@@ -239,6 +247,7 @@ class RAGAgent(BaseAgent):
             "execution_time": 0.0,
             "total_attempts": 0,
             "success": False,
+            "security_enabled": security_enabled,
         }
 
         try:

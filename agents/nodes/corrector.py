@@ -34,11 +34,20 @@ class SelfCorrectionNode:
         # Increment correction attempts
         state["correction_attempts"] = correction_attempts + 1
 
+        # Check for security violations first - these should not be corrected
+        validation_errors = state.get("validation_errors", [])
+        if validation_errors:
+            for error in validation_errors:
+                if "Security violation" in error or "sensitive data blocked" in error.lower():
+                    # Security violations should not be corrected, just pass through to output
+                    state["next_action"] = "output_formatter"
+                    state["success"] = False
+                    return state
+
         # Gather all available feedback
         feedback_parts = []
 
         # Validation errors
-        validation_errors = state.get("validation_errors", [])
         if validation_errors:
             feedback_parts.append("Validation Errors:")
             for error in validation_errors:

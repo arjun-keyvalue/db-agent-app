@@ -234,7 +234,8 @@ app.layout = dbc.Container([
                                         options=[
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "Visualize", "value": "visualize"},
-                                            {"label": "Multi-Table Join using RAG", "value": "multitablejoin"}
+                                            {"label": "Multi-Table Join using RAG", "value": "multitablejoin"},
+                                            {"label": "Agent with self-correction and validation", "value": "rag_advanced"}
                                         ],
                                         value="schema",
                                         size="sm",
@@ -930,7 +931,21 @@ def view_database_tables(n_clicks, chat_history):
      Input("security-guardrail", "value")]
 )
 def update_settings(strategy, security):
+    # When strategy is "rag_advanced", force security to False since checkbox is hidden
+    if strategy == "rag_advanced":
+        security = False
     return {"strategy": strategy, "security": security}
+
+# Callback to hide security guardrail checkbox when strategy is "rag_advanced"
+@app.callback(
+    Output("security-guardrail", "style"),
+    [Input("query-strategy", "value")]
+)
+def toggle_security_checkbox_visibility(strategy):
+    if strategy == "rag_advanced":
+        return {"display": "none"}
+    else:
+        return {"display": "block"}
 
 # Callback for disconnect button (only active when button exists)
 @app.callback(
