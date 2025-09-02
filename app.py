@@ -233,10 +233,8 @@ app.layout = dbc.Container([
                                         id="query-strategy",
                                         options=[
                                             {"label": "Schema-Based Querying", "value": "schema"},
-                                            {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
-                                            {"label": "RAG (Self-Correction and Validation)", "value": "rag_advanced"},
                                             {"label": "Visualize", "value": "visualize"},
-                                            {"label": "Multi-Table Join", "value": "multitablejoin"}
+                                            {"label": "Multi-Table Join using RAG", "value": "multitablejoin"}
                                         ],
                                         value="schema",
                                         size="sm",
