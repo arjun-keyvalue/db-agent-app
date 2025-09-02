@@ -278,3 +278,4 @@ Thumbs.db
 
 _transactions/
 *.lance
+lancedb_rag
