@@ -555,7 +555,10 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                 import re
 
                 # Define sensitive tables that contain PII or credentials
-                sensitive_tables = ["users", "user", "accounts", "account"]
+                sensitive_tables = [
+                    "users", "user", "accounts", "account", 
+                    "employees", "employee", "employee_management"
+                ]
 
                 # Define safe columns for sensitive tables (columns that can be safely exposed)
                 safe_columns = {
@@ -588,6 +591,36 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                         "is_active",
                         "created_at",
                         "updated_at",
+                    ],
+                    "employees": [
+                        "employee_id",
+                        "first_name",
+                        "last_name",
+                        "hire_date",
+                        "status",
+                        "role_id",
+                        "manager_id",
+                        "team_id",
+                    ],
+                    "employee": [
+                        "employee_id",
+                        "first_name",
+                        "last_name",
+                        "hire_date",
+                        "status",
+                        "role_id",
+                        "manager_id",
+                        "team_id",
+                    ],
+                    "employee_management": [
+                        "employee_id",
+                        "first_name",
+                        "last_name",
+                        "hire_date",
+                        "status",
+                        "role_id",
+                        "manager_id",
+                        "team_id",
                     ],
                 }
 
@@ -635,13 +668,15 @@ class BasicSecurityGuardrail(SecurityGuardrail):
 
                 # Check for SELECT queries on sensitive tables
                 select_match = re.search(
-                    r"SELECT\s+(.*?)\s+FROM\s+(\w+)",
+                    r"SELECT\s+(.*?)\s+FROM\s+([\w.]+)",
                     sql_query,
                     re.IGNORECASE | re.DOTALL,
                 )
                 if select_match:
                     select_clause = select_match.group(1).strip()
-                    table_name = select_match.group(2).strip().lower()
+                    full_table_name = select_match.group(2).strip()
+                    # Extract table name without schema prefix
+                    table_name = full_table_name.split('.')[-1].lower()
 
                     # If querying a sensitive table, modify the SELECT clause to only include safe columns
                     if table_name in sensitive_tables:
@@ -651,8 +686,8 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                             if safe_cols:
                                 modified_select = ", ".join(safe_cols)
                                 sql_query = re.sub(
-                                    r"SELECT\s+\*\s+FROM\s+" + re.escape(table_name),
-                                    f"SELECT {modified_select} FROM {table_name}",
+                                    r"SELECT\s+\*\s+FROM\s+" + re.escape(full_table_name),
+                                    f"SELECT {modified_select} FROM {full_table_name}",
                                     sql_query,
                                     flags=re.IGNORECASE,
                                 )
@@ -687,7 +722,7 @@ class BasicSecurityGuardrail(SecurityGuardrail):
 
                                 # Check if it's a sensitive column
                                 if re.search(
-                                    r"\b(user_?name|username|password|passwd|password_?hash|pwd_hash|email|phone_?number|date_?of_?birth)\b",
+                                    r"\b(user_?name|username|password|passwd|password_?hash|pwd_hash|email|phone|phone_?number|address|date_?of_?birth|dob|ssn|social_?security|credit_?card|card_?number)\b",
                                     normalized_col,
                                 ):
                                     sensitive_cols_found.append(col.strip())
@@ -703,8 +738,8 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                                         r"SELECT\s+"
                                         + re.escape(select_clause)
                                         + r"\s+FROM\s+"
-                                        + re.escape(table_name),
-                                        f"SELECT {modified_select} FROM {table_name}",
+                                        + re.escape(full_table_name),
+                                        f"SELECT {modified_select} FROM {full_table_name}",
                                         sql_query,
                                         flags=re.IGNORECASE,
                                     )
@@ -720,8 +755,8 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                                             r"SELECT\s+"
                                             + re.escape(select_clause)
                                             + r"\s+FROM\s+"
-                                            + re.escape(table_name),
-                                            f"SELECT {modified_select} FROM {table_name}",
+                                            + re.escape(full_table_name),
+                                            f"SELECT {modified_select} FROM {full_table_name}",
                                             sql_query,
                                             flags=re.IGNORECASE,
                                         )
@@ -753,7 +788,7 @@ class BasicSecurityGuardrail(SecurityGuardrail):
                             "Classify the following user request for database safety. "
                             "If it could cause destructive effects (e.g., DROP/TRUNCATE/ALTER/DELETE/INSERT/CREATE/GRANT/REVOKE, privilege escalation, exfiltration), label it UNSAFE. "
                             "If it looks like a harmless read/query request, label it SAFE. "
-                            "Note: Queries on sensitive tables (like users) will be automatically modified to exclude sensitive data, so they should be labeled SAFE. "
+                            "Note: Queries on sensitive tables (like users, employees) will be automatically modified to exclude sensitive data, so they should be labeled SAFE. "
                             "Respond with SAFE or UNSAFE only.\n\nRequest: "
                             + (context.get("user_input") or "")
                         )
