@@ -64,26 +64,30 @@ class IntentDetectorNode:
             intent_analysis = response.choices[0].message.content.strip()
 
             # Parse the intent analysis
-            intent_info = self._parse_intent_response(intent_analysis)
+            intent_info = self._parse_intent_response(intent_analysis, user_query)
 
             # Store intent information in state
             state["user_intent"] = intent_info
 
             # Check if query should be rejected
-            if (
-                intent_info.get("should_reject", False)
-                or intent_info.get("primary_intent") == "non_database_query"
-            ):
+            # Use both LLM result and fallback validation
+            should_reject_query = self._should_reject_query(user_query, intent_info)
+
+            if should_reject_query:
                 state["error_message"] = (
                     "I can only help with database-related queries. Please ask about your data, tables, or specific information you'd like to retrieve from the database."
                 )
                 state["next_action"] = "output_formatter"
                 state["success"] = False
-                AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), True)
+                AgentStepLogger.log_intent_result(
+                    user_query, intent_info.get("primary_intent", "unknown"), True
+                )
                 return state
 
             state["next_action"] = "context_retriever"
-            AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), False)
+            AgentStepLogger.log_intent_result(
+                user_query, intent_info.get("primary_intent", "unknown"), False
+            )
 
         except Exception as e:
             logger.debug(f"LLM intent detection failed: {str(e)}, using fallback")
@@ -93,20 +97,23 @@ class IntentDetectorNode:
             state["user_intent"] = intent_info
 
             # Check if query should be rejected (same logic as above)
-            if (
-                intent_info.get("should_reject", False)
-                or intent_info.get("primary_intent") == "non_database_query"
-            ):
+            should_reject_query = self._should_reject_query(user_query, intent_info)
+
+            if should_reject_query:
                 state["error_message"] = (
                     "I can only help with database-related queries. Please ask about your data, tables, or specific information you'd like to retrieve from the database."
                 )
                 state["next_action"] = "output_formatter"
                 state["success"] = False
-                AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), True)
+                AgentStepLogger.log_intent_result(
+                    user_query, intent_info.get("primary_intent", "unknown"), True
+                )
                 return state
 
             state["next_action"] = "context_retriever"
-            AgentStepLogger.log_intent_result(user_query, intent_info.get("primary_intent", "unknown"), False)
+            AgentStepLogger.log_intent_result(
+                user_query, intent_info.get("primary_intent", "unknown"), False
+            )
 
         return state
 
@@ -154,7 +161,7 @@ Respond with valid JSON only:
 
         return prompt
 
-    def _parse_intent_response(self, response: str) -> Dict[str, Any]:
+    def _parse_intent_response(self, response: str, user_query: str) -> Dict[str, Any]:
         """Parse the intent detection response"""
 
         try:
@@ -162,16 +169,16 @@ Respond with valid JSON only:
 
             # Clean up response
             response = response.strip()
-            
+
             # Handle empty or invalid responses
             if not response or len(response) < 5:
                 raise json.JSONDecodeError("Empty or too short response", response, 0)
-            
+
             if response.startswith("```json"):
                 response = response[7:]
             if response.endswith("```"):
                 response = response[:-3]
-            
+
             response = response.strip()
             if not response:
                 raise json.JSONDecodeError("Empty response after cleanup", response, 0)
@@ -194,7 +201,7 @@ Respond with valid JSON only:
             logger.warning(f"Failed to parse intent response: {e}")
 
             # Fallback: simple keyword-based intent detection
-            return self._fallback_intent_detection(response)
+            return self._fallback_intent_detection(user_query)
 
     def _fallback_intent_detection(self, user_query: str) -> Dict[str, Any]:
         """Fallback intent detection using simple keyword matching"""
@@ -344,3 +351,51 @@ Respond with valid JSON only:
             "reasoning": "Fallback keyword-based detection",
             "should_reject": False,
         }
+
+    def _should_reject_query(self, user_query: str, intent_info: dict) -> bool:
+        """
+        Determine if query should be rejected using both LLM result and fallback validation
+        """
+        # First check LLM result
+        if (
+            intent_info.get("should_reject", False)
+            or intent_info.get("primary_intent") == "non_database_query"
+        ):
+            return True
+
+        # Additional validation: check if it's actually a greeting using fallback logic
+        query_lower = user_query.lower().strip()
+
+        # Common greeting patterns that should always be rejected
+        greeting_patterns = [
+            "hi",
+            "hello",
+            "hey",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "how are you",
+            "what's up",
+            "thanks",
+            "thank you",
+            "bye",
+            "goodbye",
+            "what can you do",
+            "who are you",
+            "what are you",
+        ]
+
+        # Check if query matches greeting patterns exactly or starts with them
+        if query_lower in greeting_patterns:
+            return True
+
+        if any(
+            query_lower.startswith(pattern) for pattern in greeting_patterns[:6]
+        ):  # hi, hello, hey, etc.
+            return True
+
+        # If query is very short and has no database keywords, reject it
+        if len(query_lower) < 3:
+            return True
+
+        return False
