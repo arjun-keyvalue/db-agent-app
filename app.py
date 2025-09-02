@@ -11,7 +11,6 @@ from config import Config
 import uuid
 import plotly.graph_objects as go
 import os
-from simple_rag.rag_logic import create_sql_agent
 
 # Add the hardcoded SQLite3 database path
 SQLITE_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'database', 'sqllite3', 'library.db')
@@ -236,7 +235,6 @@ app.layout = dbc.Container([
                                             {"label": "Schema-Based Querying", "value": "schema"},
                                             {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Visualize", "value": "visualize"},
-                                            {"label": "RAG (Retrieval-Augmented Generation)", "value": "rag"},
                                             {"label": "Multi-Table Join", "value": "multitablejoin"},
                                             {"label": "Simple RAG", "value": "simple_rag"}
                                         ],
@@ -249,7 +247,7 @@ app.layout = dbc.Container([
                                     dbc.Checkbox(
                                         id="security-guardrail",
                                         label="Security Guardrails",
-                                        value=True,
+                                        value=False,
                                         className="text-light"
                                     )
                                 ], md=4, className="d-flex align-items-center justify-content-center", style={"marginTop": "10px"})
@@ -439,10 +437,12 @@ def update_chat(n_clicks, n_submit, input_value, chat_history, settings, connect
             if sql_success:
                 # Apply security validation if enabled
                 if security_guardrail:
-                    security_success, security_message = security_guardrail.validate_query(sql_result, db_context)
+                    security_success, security_message, modified_sql = security_guardrail.validate_query(sql_result, db_context)
                     if not security_success:
                         agent_response = f"🚫 Security Check Failed: {security_message}\n\nQuery blocked for security reasons."
                     else:
+                        # Use the modified SQL query if it was changed
+                        sql_result = modified_sql
                         # Execute the query
                         exec_success, exec_result = query_engine.execute_query(sql_result)
                         if exec_success:
