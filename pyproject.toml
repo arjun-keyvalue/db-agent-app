@@ -28,4 +28,5 @@ dependencies = [
     "seaborn>=0.13.0",
     "matplotlib>=3.8.0",
     "langchain-groq>=0.3.7",
+    "sentence-transformers>=5.1.0",
 ]
