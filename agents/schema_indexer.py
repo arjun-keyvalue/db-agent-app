@@ -180,8 +180,21 @@ class SchemaIndexer:
     def _initialize_lancedb(self):
         """Initialize LanceDB connection following the official docs pattern"""
         try:
-            # Create directory if it doesn't exist
+            # Create directory if it doesn't exist with proper permissions
             os.makedirs(self.lancedb_path, exist_ok=True)
+
+            # Verify directory is writable
+            test_file = os.path.join(self.lancedb_path, ".test_write")
+            try:
+                with open(test_file, "w") as f:
+                    f.write("test")
+                os.remove(test_file)
+            except Exception as perm_error:
+                logger.error(
+                    f"Directory {self.lancedb_path} is not writable: {perm_error}"
+                )
+                self.db = None
+                return
 
             # Connect to LanceDB - following the basic usage pattern from docs
             self.db = lancedb.connect(self.lancedb_path)
@@ -189,11 +202,11 @@ class SchemaIndexer:
             # Test the connection by listing tables
             table_names = self.db.table_names()
             logger.debug(
-                f"LanceDB connected at: {self.lancedb_path}, existing tables: {table_names}"
+                f"✅ LanceDB connected at: {self.lancedb_path}, existing tables: {table_names}"
             )
 
         except Exception as e:
-            logger.error(f"Failed to initialize LanceDB: {str(e)}")
+            logger.error(f"❌ Failed to initialize LanceDB: {str(e)}")
             import traceback
 
             logger.debug(f"LanceDB initialization traceback: {traceback.format_exc()}")
@@ -202,10 +215,10 @@ class SchemaIndexer:
     def index_database_schema(self, db_connection) -> bool:
         """Index the entire database schema"""
 
-        if not self.db:
+        if self.db is None:
             logger.error("LanceDB not initialized - attempting to reinitialize...")
             self._initialize_lancedb()
-            if not self.db:
+            if self.db is None:
                 logger.error("Failed to reinitialize LanceDB")
                 return False
 
@@ -269,13 +282,8 @@ class SchemaIndexer:
                 table_name = "database_schema"
 
                 try:
-                    # Drop existing table if it exists
-                    existing_tables = self.db.table_names()
-                    if table_name in existing_tables:
-                        self.db.drop_table(table_name)
-                        logger.debug(f"Dropped existing table: {table_name}")
-
                     # Create new table with data - using mode="overwrite" as per docs
+                    # This automatically handles existing tables
                     self.schema_table = self.db.create_table(
                         table_name, schema_documents, mode="overwrite"
                     )
@@ -347,7 +355,7 @@ class SchemaIndexer:
         """Search for relevant schema information"""
 
         # Try to open the schema table if not already available
-        if not self.schema_table and self.db:
+        if not self.schema_table and self.db is not None:
             try:
                 if "database_schema" in self.db.table_names():
                     self.schema_table = self.db.open_table("database_schema")
@@ -483,7 +491,7 @@ def auto_index_on_connection(db_connection) -> bool:
             embedding_model=Config.EMBEDDING_MODEL,
         )
 
-        if not indexer.db:
+        if indexer.db is None:
             logger.error(
                 "LanceDB not initialized. Make sure directory exists and permissions are correct."
             )
@@ -493,7 +501,7 @@ def auto_index_on_connection(db_connection) -> bool:
                 logger.info(f"Created directory: {indexer.lancedb_path}")
                 # Try to reinitialize
                 indexer._initialize_lancedb()
-                if not indexer.db:
+                if indexer.db is None:
                     logger.warning(
                         "LanceDB still not initialized after directory creation, skipping auto-indexing"
                     )
